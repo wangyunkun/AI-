@@ -3,11 +3,11 @@ name: Build Flet App
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch: # 允许你在 GitHub Actions 页面手动点击运行
 
 jobs:
   # ============================================
-  # 任务一：Windows EXE 打包
+  # 任务一：打包 Windows EXE (电脑版)
   # ============================================
   build-windows:
     runs-on: windows-latest
@@ -23,13 +23,13 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # 安装依赖 (必须包含 xlsxwriter)
+          # 安装项目依赖 (必须包含 pandas, xlsxwriter, flet, openai)
           pip install -r requirements.txt
           # 安装打包工具
           pip install flet pyinstaller pillow
 
       - name: Build EXE with Flet Pack
-        # Windows下文件名建议用英文，否则可能乱码，这里设为 SafetyCheckAI.exe
+        # 生成的 exe 文件名为 SafetyCheckAI.exe (建议用英文文件名，程序界面内是中文)
         run: |
           flet pack main.py --name SafetyCheckAI --verbose
 
@@ -40,7 +40,7 @@ jobs:
           path: dist/*.exe
 
   # ============================================
-  # 任务二：Android APK 打包 (已修复名称问题)
+  # 任务二：打包 Android APK (手机版)
   # ============================================
   build-android:
     runs-on: ubuntu-latest
@@ -68,23 +68,29 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install flet
-          # 必须安装 requirements.txt 中的 xlsxwriter 等库，否则APP导出功能会闪退
+          # 这一步至关重要，必须安装 xlsxwriter 否则导出 Excel 会闪退
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      # 【核心修复步骤】
-      # 因为 flet build 命令不支持直接传中文名参数
-      # 所以这里用命令动态生成一个配置文件 pyproject.toml
-      - name: Create Config File for App Name
+      # ===========================================================
+      # 【核心修复】生成配置文件
+      # 1. 设置 APP 名称为 "安全检查AI"
+      # 2. 赋予 APP 读写存储的权限 (解决导出 Excel 为空文件的问题)
+      # ===========================================================
+      - name: Create Config File (pyproject.toml)
         run: |
           echo '[tool.flet]' > pyproject.toml
           echo 'product_name = "安全检查AI"' >> pyproject.toml
           echo 'org = "com.safety.ai"' >> pyproject.toml
           echo 'product_description = "施工安全隐患排查工具"' >> pyproject.toml
-          # 打印一下文件内容，方便在日志里检查
+          
+          # 下面这行赋予写文件权限，配合 Python 代码中的 Download 文件夹路径
+          echo 'android_permissions = ["WRITE_EXTERNAL_STORAGE", "READ_EXTERNAL_STORAGE"]' >> pyproject.toml
+          
+          # 打印出来检查一下内容是否正确
           cat pyproject.toml
 
       - name: Build APK
-        # 这里不需要加 --product-name 了，因为它会自动读取上面生成的 pyproject.toml
+        # 注意：这里不需要 --product-name 参数，因为它会自动读取上面的 pyproject.toml
         run: |
           flet build apk --verbose
 
