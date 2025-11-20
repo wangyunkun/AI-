@@ -1,0 +1,41 @@
+name: Build App
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # 这里你可以选择你需要打包的平台，比如 windows-latest, macos-latest, ubuntu-latest
+        os: [windows-latest, macos-latest]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9' # 根据你的需要调整版本
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller
+      # 注意：如果你是 GUI 程序，加上 --noconsole 或 --windowed
+      run: |
+        pyinstaller --onefile --name myapp main.py
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: myapp-${{ matrix.os }}
+        path: dist/
