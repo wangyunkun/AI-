@@ -4,6 +4,7 @@ import json
 import threading
 import pandas as pd
 import os
+import sys  # 新增 sys 模块用于强制退出
 from datetime import datetime
 from openai import OpenAI
 
@@ -24,11 +25,6 @@ PROVIDER_PRESETS = {
         "model": "deepseek-chat",
         "api_key": ""
     },
-    "火山引擎 (豆包)": {
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-        "model": "doubao-pro-4k-vl",
-        "api_key": ""
-    },
     "自定义 (Custom)": {
         "base_url": "",
         "model": "",
@@ -45,7 +41,7 @@ DEFAULT_PROMPT = """你是一位拥有30年一线经验的**国家注册安全�
 ### 第一优先级：大型机械与特种设备（深度审查）
 1. **起重吊装**：
    - 汽车吊/履带吊：支腿是否完全伸出并垫实？吊臂下是否有人员逗留？是否有司索工/指挥人员？
-   - 吊装作业设备：是否违章用装载机、挖机等机械进行吊装？是否有违规起吊（歪拉斜吊、超载、非标准吊具）？
+   - 吊装作业设备：是否用装载机、挖机等机械吊装？是否有违规起吊（歪拉斜吊、超载）？
 2. **土方机械**：
    - 挖掘机/装载机：作业半径内是否有闲杂人员？驾驶室是否有人违规搭乘？停放位置是否在大坡度或坑边？
 3. **桩机/钻机**：
@@ -92,7 +88,8 @@ DEFAULT_PROMPT = """你是一位拥有30年一线经验的**国家注册安全�
     }
 ]
 
-如果未发现任何问题，返回 []。"""
+如果未发现任何问题，返回 []。
+"""
 
 CONFIG_FILE = "app_config_final.json"
 
@@ -139,17 +136,17 @@ class SafetyApp:
 
 def main(page: ft.Page):
     # ================= 页面设置 =================
-    page.title = "AI安全排查器-普洱版纳区域测试版"
+    page.title = "普洱版纳区域安全检查AI助理"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = "#f2f4f7"
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
 
-    # 电脑端默认窗口大小设置
-    page.window_width = 1200
-    page.window_height = 850
-    page.window_min_width = 380
-    page.window_min_height = 600
+    # 【修复点1】更新窗口属性写法，兼容 Flet 0.21.0+
+    page.window.width = 1200
+    page.window.height = 850
+    page.window.min_width = 380
+    page.window.min_height = 600
 
     app = SafetyApp()
 
@@ -240,6 +237,15 @@ def main(page: ft.Page):
         tf_key.value = conf.get("api_key", "")
         page.update()
 
+    # 【修复点2】更新退出逻辑，兼容新旧版及手机端
+    def on_exit_app(e):
+        try:
+            # 尝试使用 Flet 新版关闭方法
+            page.window.close()
+        except Exception:
+            # 如果失败（如在手机端某些环境），强制退出 Python 进程
+            sys.exit(0)
+
     def run_task(e):
         if not app.init_client():
             status_txt.value = "❌ 未配置API";
@@ -293,46 +299,46 @@ def main(page: ft.Page):
     def on_save_excel(e):
         if not e.path: return
         save_path = e.path
-        # 1. 强制修正文件后缀
         if not save_path.endswith(".xlsx"):
             save_path += ".xlsx"
 
         try:
             if not app.current_data: raise Exception("无数据")
 
-            # 2. 数据转换：JSON -> DataFrame
-            df = pd.DataFrame(app.current_data)
+            # 数据标准化
+            normalized_data = []
+            for item in app.current_data:
+                normalized_data.append({
+                    "隐患描述": item.get("issue", "未描述"),
+                    "依据规范": item.get("regulation", "未提供"),
+                    "整改建议": item.get("correction", "未提供")
+                })
 
-            # 3. 强制重命名表头 (关键修复)
-            df.rename(columns={"issue": "隐患描述", "regulation": "依据规范", "correction": "整改建议"}, inplace=True)
+            df = pd.DataFrame(normalized_data)
 
-            # 4. 确保列存在
-            for col in ["隐患描述", "依据规范", "整改建议"]:
+            expected_cols = ["隐患描述", "依据规范", "整改建议"]
+            for col in expected_cols:
                 if col not in df.columns: df[col] = ""
-            df = df[["隐患描述", "依据规范", "整改建议"]]  # 排序
 
-            # 5. 使用 xlsxwriter 写入并美化
+            df = df[expected_cols]
+
+            # 写入 Excel
             with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
                 df.to_excel(writer, sheet_name='排查报告', index=False, startrow=1)
-                wb = writer.book;
+                wb = writer.book
                 ws = writer.sheets['排查报告']
 
-                # 样式定义
                 fmt_title = wb.add_format(
                     {'bold': True, 'font_size': 16, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1})
                 fmt_header = wb.add_format(
                     {'bold': True, 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1, 'align': 'center'})
                 fmt_body = wb.add_format({'text_wrap': True, 'valign': 'top', 'border': 1})
 
-                # 写入大标题
-                ws.merge_range('A1:C1', 'AI 安全隐患排查报告', fmt_title)
-
-                # 设置列宽
+                ws.merge_range('A1:C1', 'AI 安全检查报告', fmt_title)
                 ws.set_column('A:A', 40, fmt_body)
                 ws.set_column('B:B', 30, fmt_body)
                 ws.set_column('C:C', 50, fmt_body)
 
-                # 重写表头样式
                 for col_num, value in enumerate(df.columns.values):
                     ws.write(1, col_num, value, fmt_header)
 
@@ -340,7 +346,7 @@ def main(page: ft.Page):
             page.snack_bar.open = True;
             page.update()
         except Exception as err:
-            page.snack_bar = ft.SnackBar(ft.Text(f"失败: {str(err)}"), bgcolor="red");
+            page.snack_bar = ft.SnackBar(ft.Text(f"导出失败: {str(err)}"), bgcolor="red");
             page.snack_bar.open = True;
             page.update()
 
@@ -364,8 +370,11 @@ def main(page: ft.Page):
 
     header = ft.Container(
         content=ft.Row([
-            ft.Text("🛡️ 安全排查AI", size=18, weight="bold"),
-            ft.IconButton(ft.Icons.SETTINGS, on_click=lambda e: page.open(dlg_settings))
+            ft.Text("🛡️ 普洱版纳区域安全检查AI助理", size=18, weight="bold"),
+            ft.Row([
+                ft.IconButton(ft.Icons.SETTINGS, tooltip="设置", on_click=lambda e: page.open(dlg_settings)),
+                ft.IconButton(ft.Icons.EXIT_TO_APP, tooltip="退出系统", icon_color="red", on_click=on_exit_app)
+            ])
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
         padding=15, bgcolor="white", border_radius=10, shadow=ft.BoxShadow(blur_radius=2, color=ft.Colors.BLACK12)
     )
@@ -377,8 +386,7 @@ def main(page: ft.Page):
                                     style=ft.ButtonStyle(bgcolor="blue", color="white", padding=15,
                                                          shape=ft.RoundedRectangleBorder(radius=8)))
 
-    # 修复：默认中文文件名
-    default_filename = f"排查报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    default_filename = f"检查报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
     btn_export = ft.ElevatedButton("导出", icon=ft.Icons.DOWNLOAD,
                                    on_click=lambda _: save_dlg.save_file(file_name=default_filename), disabled=True,
                                    style=ft.ButtonStyle(color="green", padding=15,
@@ -397,7 +405,6 @@ def main(page: ft.Page):
         ]),
 
         ft.Column(col={"xs": 12, "md": 7}, controls=[
-            # 修复：移除了 min_height 属性，防止旧版 Flet 报错
             ft.Container(
                 content=ft.Column([
                     ft.Text("📋 检查结果", size=16, weight="bold", color=ft.Colors.GREY_700),
