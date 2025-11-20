@@ -1,4 +1,5 @@
 flet
 openai
 pandas
+openpyxl
 xlsxwriter
