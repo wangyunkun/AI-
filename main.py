@@ -2,12 +2,16 @@ import flet as ft
 import base64
 import json
 import threading
-import pandas as pd
 import os
 import sys
-import io  # 核心库：用于内存文件操作
+import io
 from datetime import datetime
 from openai import OpenAI
+# 【新增】导入 docx 库
+from docx import Document
+from docx.shared import Pt
+from docx.oxml.ns import qn
+from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
 # ================= 1. 预设配置 =================
 PROVIDER_PRESETS = {
@@ -137,13 +141,12 @@ class SafetyApp:
 
 def main(page: ft.Page):
     # ================= 页面设置 =================
-    page.title = "普洱版纳区域安全检查AI助理"
+    page.title = "普洱版纳区域安全检查AI"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = "#f2f4f7"
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
 
-    # 【修复】适配 Flet 0.21.0+ 新版窗口属性写法
     page.window.width = 1200
     page.window.height = 850
     page.window.min_width = 380
@@ -238,7 +241,6 @@ def main(page: ft.Page):
         tf_key.value = conf.get("api_key", "")
         page.update()
 
-    # 【修复】退出应用逻辑
     def on_exit_app(e):
         try:
             page.window.close()
@@ -295,87 +297,81 @@ def main(page: ft.Page):
             btn_analyze.disabled = False
             page.update()
 
-    # ================= 【关键】Excel 导出逻辑 =================
-    def on_save_excel(e):
+    # ================= 【核心】Word 导出逻辑 =================
+    def on_save_word(e):
         """
-        核心导出逻辑：
-        1. 生成 Excel 二进制流 (BytesIO) 避免文件锁。
-        2. 如果是电脑端：写入用户选择的 FilePicker 路径。
-        3. 如果是手机端：直接写入安卓 Download 公共目录，绕过 FilePicker 权限限制。
+        Word 导出函数
         """
 
-        # --- 内部函数：生成 Excel 二进制数据 ---
-        def generate_excel_bytes():
+        # --- 内部函数：生成 Word 二进制流 ---
+        def generate_word_bytes():
             if not app.current_data:
                 raise Exception("无数据可导出")
 
-            # 数据清洗
-            normalized_data = []
+            # 1. 创建文档
+            doc = Document()
+
+            # 设置中文字体支持（可选，防止乱码）
+            doc.styles['Normal'].font.name = u'宋体'
+            doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'宋体')
+
+            # 2. 添加大标题
+            heading = doc.add_heading('AI 安全隐患排查报告', 0)
+            heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+
+            doc.add_paragraph(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            doc.add_paragraph(f"隐患数量: {len(app.current_data)} 项")
+            doc.add_paragraph("-" * 30)
+
+            # 3. 创建表格 (行数 = 数据行数 + 1表头, 列数=3)
+            table = doc.add_table(rows=1, cols=3)
+            table.style = 'Table Grid'  # 添加边框
+
+            # 设置表头
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = '隐患描述'
+            hdr_cells[1].text = '依据规范'
+            hdr_cells[2].text = '整改建议'
+
+            # 填充数据
             for item in app.current_data:
-                normalized_data.append({
-                    "隐患描述": item.get("issue", "未描述"),
-                    "依据规范": item.get("regulation", "未提供"),
-                    "整改建议": item.get("correction", "未提供")
-                })
+                row_cells = table.add_row().cells
+                row_cells[0].text = item.get("issue", "")
+                row_cells[1].text = item.get("regulation", "")
+                row_cells[2].text = item.get("correction", "")
 
-            df = pd.DataFrame(normalized_data)
-            expected_cols = ["隐患描述", "依据规范", "整改建议"]
-            for col in expected_cols:
-                if col not in df.columns: df[col] = ""
-            df = df[expected_cols]
-
-            # 写入内存缓冲区
+            # 4. 保存到内存流
             output_buffer = io.BytesIO()
-            with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='排查报告', index=False, startrow=1)
-                wb = writer.book
-                ws = writer.sheets['排查报告']
-                fmt_title = wb.add_format(
-                    {'bold': True, 'font_size': 16, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1})
-                fmt_header = wb.add_format(
-                    {'bold': True, 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1, 'align': 'center'})
-                fmt_body = wb.add_format({'text_wrap': True, 'valign': 'top', 'border': 1})
-                ws.merge_range('A1:C1', 'AI 安全检查报告', fmt_title)
-                ws.set_column('A:A', 40, fmt_body)
-                ws.set_column('B:B', 30, fmt_body)
-                ws.set_column('C:C', 50, fmt_body)
-                for col_num, value in enumerate(df.columns.values):
-                    ws.write(1, col_num, value, fmt_header)
-
+            doc.save(output_buffer)
             return output_buffer.getvalue()
 
         # -------------------------------------------
 
-        # 判断当前平台是否为手机 (安卓/iOS)
         is_mobile = page.platform in ["android", "ios"]
 
         try:
-            # === 分支 A：电脑端 (Windows/Mac/Linux) ===
+            # 准备文件名 (.docx)
+            filename = f"安全报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+
+            # === 分支 A：电脑端 ===
             if not is_mobile:
-                # 电脑端必须依赖 FilePicker 返回的 e.path
                 if hasattr(e, "path") and e.path:
                     save_path = e.path
-                    if not save_path.endswith(".xlsx"): save_path += ".xlsx"
+                    if not save_path.endswith(".docx"): save_path += ".docx"
 
-                    data = generate_excel_bytes()
+                    data = generate_word_bytes()
                     with open(save_path, "wb") as f:
                         f.write(data)
 
-                    page.snack_bar = ft.SnackBar(ft.Text(f"✅ 导出成功: {os.path.basename(save_path)}"), bgcolor="green")
+                    page.snack_bar = ft.SnackBar(ft.Text(f"✅ 导出Word成功"), bgcolor="green")
                     page.snack_bar.open = True
                     page.update()
                 return
 
-            # === 分支 B：手机端 (Android/iOS) ===
-            # 手机端直接写入 Download 文件夹，不使用 FilePicker
-            excel_data = generate_excel_bytes()
+            # === 分支 B：手机端 ===
+            word_data = generate_word_bytes()
 
-            filename = f"安全检查_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-
-            # 尝试写入安卓标准的下载目录
-            # 路径1: 标准 Android 下载路径
-            # 路径2: 备用 SD 卡路径
-            # 路径3: APP 私有路径 (保底)
+            # 安卓路径尝试列表
             possible_paths = [
                 f"/storage/emulated/0/Download/{filename}",
                 f"/sdcard/Download/{filename}",
@@ -383,27 +379,30 @@ def main(page: ft.Page):
             ]
 
             success_path = ""
+            error_log = []
+
             for path in possible_paths:
                 try:
                     with open(path, "wb") as f:
-                        f.write(excel_data)
+                        f.write(word_data)
                     success_path = path
-                    break  # 写入成功，退出尝试
+                    break
                 except Exception as e_path:
-                    print(f"尝试路径失败 {path}: {e_path}")
+                    error_log.append(f"{path}: {str(e_path)}")
                     continue
 
             if success_path:
-                # 弹窗提示用户去哪里找文件
                 dlg_success = ft.AlertDialog(
                     title=ft.Text("导出成功"),
-                    content=ft.Text(f"表格已保存到手机的【下载/Download】文件夹。\n\n文件名:\n{filename}", size=16),
+                    content=ft.Text(f"Word报告已保存至手机【下载/Download】文件夹。\n\n文件名:\n{filename}", size=16),
                     actions=[ft.TextButton("确定", on_click=lambda e: page.close(dlg_success))]
                 )
                 page.open(dlg_success)
                 page.update()
             else:
-                raise Exception("写入手机存储失败，请检查存储权限")
+                # 如果都失败了，打印具体路径错误，方便排查
+                all_errors = "\n".join(error_log)
+                raise Exception(f"写入失败，请检查权限。\n{all_errors}")
 
         except Exception as err:
             page.snack_bar = ft.SnackBar(ft.Text(f"导出失败: {str(err)}"), bgcolor="red")
@@ -426,15 +425,13 @@ def main(page: ft.Page):
                                   actions=[ft.TextButton("保存", on_click=save_config)])
 
     pick_dlg = ft.FilePicker(on_result=on_picked)
-
-    # 电脑端仍然需要这个 FilePicker
-    save_dlg = ft.FilePicker(on_result=on_save_excel)
+    save_dlg = ft.FilePicker(on_result=on_save_word)  # 更改为 Word 保存
 
     page.overlay.extend([pick_dlg, save_dlg])
 
     header = ft.Container(
         content=ft.Row([
-            ft.Text("🛡️ 普洱版纳区域安全检查AI助理", size=18, weight="bold"),
+            ft.Text("🛡️ 普洱版纳区域安全检查AI", size=18, weight="bold"),
             ft.Row([
                 ft.IconButton(ft.Icons.SETTINGS, tooltip="设置", on_click=lambda e: page.open(dlg_settings)),
                 ft.IconButton(ft.Icons.EXIT_TO_APP, tooltip="退出系统", icon_color="red", on_click=on_exit_app)
@@ -450,20 +447,18 @@ def main(page: ft.Page):
                                     style=ft.ButtonStyle(bgcolor="blue", color="white", padding=15,
                                                          shape=ft.RoundedRectangleBorder(radius=8)))
 
-    default_filename = f"检查报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    default_filename = f"安全报告_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
 
-    # 【修复】导出按钮逻辑：根据平台分流
     def trigger_export(e):
         if page.platform in ["android", "ios"]:
-            # 手机端：直接调用导出逻辑，传入 None 作为事件对象，因为内部不需要 e.path
-            on_save_excel(None)
+            on_save_word(None)
         else:
-            # 电脑端：打开文件选择器
-            save_dlg.save_file(file_name=default_filename)
+            # 电脑端限制为 docx
+            save_dlg.save_file(file_name=default_filename, allowed_extensions=["docx"])
 
-    btn_export = ft.ElevatedButton("导出", icon=ft.Icons.DOWNLOAD,
+    btn_export = ft.ElevatedButton("导出报告", icon=ft.Icons.DESCRIPTION,  # 图标改为文档
                                    on_click=trigger_export, disabled=True,
-                                   style=ft.ButtonStyle(color="green", padding=15,
+                                   style=ft.ButtonStyle(color="purple", padding=15,  # 颜色改为紫色
                                                         shape=ft.RoundedRectangleBorder(radius=8)))
 
     layout = ft.ResponsiveRow([
