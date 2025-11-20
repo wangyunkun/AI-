@@ -3,10 +3,9 @@ import base64
 import json
 import threading
 import pandas as pd
-import io
-import shutil  # <---【新增这一行】用于文件复制
 import os
-import sys  # 新增 sys 模块用于强制退出
+import sys
+import io  # 核心库：用于内存文件操作
 from datetime import datetime
 from openai import OpenAI
 
@@ -40,10 +39,10 @@ DEFAULT_PROMPT = """你是一位拥有30年一线经验的**国家注册安全�
 
 请按照以下逻辑顺序，对画面进行“像素级”的排查：
 
-### 第一优先级：大型机械与特种设备（深度审查，必须检查部分）
+### 第一优先级：大型机械与特种设备（深度审查）
 1. **起重吊装**：
    - 汽车吊/履带吊：支腿是否完全伸出并垫实？吊臂下是否有人员逗留？是否有司索工/指挥人员？
-   - 吊装作业设备：是否违规用装载机、挖机等机械吊装？是否有违规起吊（歪拉斜吊、超载、使用非常规吊具）？
+   - 吊装作业设备：是否违章用装载机、挖机等机械进行吊装？是否有违规起吊（歪拉斜吊、超载、非标准吊具）？
 2. **土方机械**：
    - 挖掘机/装载机：作业半径内是否有闲杂人员？驾驶室是否有人违规搭乘？停放位置是否在大坡度或坑边？
 3. **桩机/钻机**：
@@ -144,7 +143,7 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
 
-    # 【修复点1】更新窗口属性写法，兼容 Flet 0.21.0+
+    # 【修复】适配 Flet 0.21.0+ 新版窗口属性写法
     page.window.width = 1200
     page.window.height = 850
     page.window.min_width = 380
@@ -219,7 +218,7 @@ def main(page: ft.Page):
     img_container = ft.Container(content=img_control, height=250, bgcolor=ft.Colors.BLACK12, border_radius=10,
                                  alignment=ft.alignment.center)
 
-    # ================= 逻辑处理 =================
+    # ================= 核心逻辑 =================
     def save_config(e):
         p = dd_provider.value
         app.config["current_provider"] = p
@@ -229,33 +228,31 @@ def main(page: ft.Page):
         app.config["providers"][p]["api_key"] = tf_key.value.strip()
         app.save_config_to_file()
         status_txt.value = "✅ 配置已保存"
-        page.close(dlg_settings);
+        page.close(dlg_settings)
         page.update()
 
     def refresh_settings(val):
         conf = app.config["providers"].get(val, {})
-        tf_url.value = conf.get("base_url", "");
-        tf_model.value = conf.get("model", "");
+        tf_url.value = conf.get("base_url", "")
+        tf_model.value = conf.get("model", "")
         tf_key.value = conf.get("api_key", "")
         page.update()
 
-    # 【修复点2】更新退出逻辑，兼容新旧版及手机端
+    # 【修复】退出应用逻辑
     def on_exit_app(e):
         try:
-            # 尝试使用 Flet 新版关闭方法
             page.window.close()
-        except Exception:
-            # 如果失败（如在手机端某些环境），强制退出 Python 进程
+        except:
             sys.exit(0)
 
     def run_task(e):
         if not app.init_client():
-            status_txt.value = "❌ 未配置API";
-            status_txt.color = "red";
-            page.update();
+            status_txt.value = "❌ 未配置API"
+            status_txt.color = "red"
+            page.update()
             return
-        btn_analyze.disabled = True;
-        btn_analyze.text = "分析中...";
+        btn_analyze.disabled = True
+        btn_analyze.text = "分析中..."
         page.update()
 
         def task():
@@ -275,16 +272,16 @@ def main(page: ft.Page):
                 data = json.loads(content[s:e_idx]) if s != -1 and e_idx != -1 else []
                 app.current_data = data
                 render_results(data)
-                status_txt.value = "✅ 分析完成";
-                status_txt.color = "green";
-                btn_analyze.text = "重新分析";
-                btn_analyze.disabled = False;
-                btn_export.disabled = False;
+                status_txt.value = "✅ 分析完成"
+                status_txt.color = "green"
+                btn_analyze.text = "重新分析"
+                btn_analyze.disabled = False
+                btn_export.disabled = False
                 page.update()
             except Exception as err:
-                status_txt.value = f"❌ {str(err)[:20]}";
-                status_txt.color = "red";
-                btn_analyze.disabled = False;
+                status_txt.value = f"❌ {str(err)[:20]}"
+                status_txt.color = "red"
+                btn_analyze.disabled = False
                 page.update()
 
         threading.Thread(target=task).start()
@@ -293,29 +290,26 @@ def main(page: ft.Page):
         if e.files:
             app.current_image_path = e.files[0].path
             img_control.src = e.files[0].path
-            status_txt.value = "📸 图片已就绪";
-            status_txt.color = "blue";
-            btn_analyze.disabled = False;
+            status_txt.value = "📸 图片已就绪"
+            status_txt.color = "blue"
+            btn_analyze.disabled = False
             page.update()
 
+    # ================= 【关键】Excel 导出逻辑 =================
     def on_save_excel(e):
-        if not e.path: return
-        
-        # 1. 获取保存路径
-        target_path = e.path
-        # 某些安卓系统返回的路径可能没有后缀，强制加上
-        if not target_path.endswith(".xlsx"):
-            target_path += ".xlsx"
+        """
+        核心导出逻辑：
+        1. 生成 Excel 二进制流 (BytesIO) 避免文件锁。
+        2. 如果是电脑端：写入用户选择的 FilePicker 路径。
+        3. 如果是手机端：直接写入安卓 Download 公共目录，绕过 FilePicker 权限限制。
+        """
 
-        try:
-            # 2. 检查数据
+        # --- 内部函数：生成 Excel 二进制数据 ---
+        def generate_excel_bytes():
             if not app.current_data:
-                page.snack_bar = ft.SnackBar(ft.Text("❌ 无数据可导出"), bgcolor="red")
-                page.snack_bar.open = True
-                page.update()
-                return
+                raise Exception("无数据可导出")
 
-            # 3. 数据准备
+            # 数据清洗
             normalized_data = []
             for item in app.current_data:
                 normalized_data.append({
@@ -323,70 +317,96 @@ def main(page: ft.Page):
                     "依据规范": item.get("regulation", "未提供"),
                     "整改建议": item.get("correction", "未提供")
                 })
-            
+
             df = pd.DataFrame(normalized_data)
             expected_cols = ["隐患描述", "依据规范", "整改建议"]
             for col in expected_cols:
                 if col not in df.columns: df[col] = ""
             df = df[expected_cols]
 
-            # =========================================================
-            # 【核心修改】使用 BytesIO 在内存中生成 Excel
-            # =========================================================
-            
-            # 创建一个内存缓冲区
+            # 写入内存缓冲区
             output_buffer = io.BytesIO()
-
-            # 让 Pandas 写入这个内存缓冲区，而不是硬盘文件
             with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
                 df.to_excel(writer, sheet_name='排查报告', index=False, startrow=1)
                 wb = writer.book
                 ws = writer.sheets['排查报告']
-                
-                # 定义样式
-                fmt_title = wb.add_format({'bold': True, 'font_size': 16, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1})
-                fmt_header = wb.add_format({'bold': True, 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1, 'align': 'center'})
+                fmt_title = wb.add_format(
+                    {'bold': True, 'font_size': 16, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1})
+                fmt_header = wb.add_format(
+                    {'bold': True, 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1, 'align': 'center'})
                 fmt_body = wb.add_format({'text_wrap': True, 'valign': 'top', 'border': 1})
-
                 ws.merge_range('A1:C1', 'AI 安全检查报告', fmt_title)
                 ws.set_column('A:A', 40, fmt_body)
                 ws.set_column('B:B', 30, fmt_body)
                 ws.set_column('C:C', 50, fmt_body)
-                
                 for col_num, value in enumerate(df.columns.values):
                     ws.write(1, col_num, value, fmt_header)
-            
-            # 此时 Excel 已经在 output_buffer 内存里生成好了
-            # 获取所有的二进制数据
-            excel_data = output_buffer.getvalue()
 
-            # =========================================================
-            # 4. 将二进制数据一次性写入 Android 文件
-            # =========================================================
-            with open(target_path, "wb") as f:
-                f.write(excel_data)
+            return output_buffer.getvalue()
 
-            page.snack_bar = ft.SnackBar(ft.Text(f"✅ 导出成功"), bgcolor="green")
-            page.snack_bar.open = True
-            page.update()
+        # -------------------------------------------
+
+        # 判断当前平台是否为手机 (安卓/iOS)
+        is_mobile = page.platform in ["android", "ios"]
+
+        try:
+            # === 分支 A：电脑端 (Windows/Mac/Linux) ===
+            if not is_mobile:
+                # 电脑端必须依赖 FilePicker 返回的 e.path
+                if hasattr(e, "path") and e.path:
+                    save_path = e.path
+                    if not save_path.endswith(".xlsx"): save_path += ".xlsx"
+
+                    data = generate_excel_bytes()
+                    with open(save_path, "wb") as f:
+                        f.write(data)
+
+                    page.snack_bar = ft.SnackBar(ft.Text(f"✅ 导出成功: {os.path.basename(save_path)}"), bgcolor="green")
+                    page.snack_bar.open = True
+                    page.update()
+                return
+
+            # === 分支 B：手机端 (Android/iOS) ===
+            # 手机端直接写入 Download 文件夹，不使用 FilePicker
+            excel_data = generate_excel_bytes()
+
+            filename = f"安全检查_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+            # 尝试写入安卓标准的下载目录
+            # 路径1: 标准 Android 下载路径
+            # 路径2: 备用 SD 卡路径
+            # 路径3: APP 私有路径 (保底)
+            possible_paths = [
+                f"/storage/emulated/0/Download/{filename}",
+                f"/sdcard/Download/{filename}",
+                os.path.join(os.getcwd(), filename)
+            ]
+
+            success_path = ""
+            for path in possible_paths:
+                try:
+                    with open(path, "wb") as f:
+                        f.write(excel_data)
+                    success_path = path
+                    break  # 写入成功，退出尝试
+                except Exception as e_path:
+                    print(f"尝试路径失败 {path}: {e_path}")
+                    continue
+
+            if success_path:
+                # 弹窗提示用户去哪里找文件
+                dlg_success = ft.AlertDialog(
+                    title=ft.Text("导出成功"),
+                    content=ft.Text(f"表格已保存到手机的【下载/Download】文件夹。\n\n文件名:\n{filename}", size=16),
+                    actions=[ft.TextButton("确定", on_click=lambda e: page.close(dlg_success))]
+                )
+                page.open(dlg_success)
+                page.update()
+            else:
+                raise Exception("写入手机存储失败，请检查存储权限")
 
         except Exception as err:
-            # 如果 Excel 失败，尝试降级导出 CSV (双重保险)
-            try:
-                csv_path = target_path.replace(".xlsx", ".csv")
-                df.to_csv(csv_path, index=False, encoding='utf-8-sig')
-                page.snack_bar = ft.SnackBar(ft.Text(f"Excel失败，已降级导出为CSV"), bgcolor="orange")
-            except:
-                page.snack_bar = ft.SnackBar(ft.Text(f"导出完全失败: {str(err)}"), bgcolor="red")
-            
-            page.snack_bar.open = True
-            page.update()
-
-        except Exception as err:
-            # 打印详细错误到界面，方便调试
-            error_msg = f"导出失败: {str(err)}"
-            print(error_msg) # 打印到控制台
-            page.snack_bar = ft.SnackBar(ft.Text(error_msg), bgcolor="red")
+            page.snack_bar = ft.SnackBar(ft.Text(f"导出失败: {str(err)}"), bgcolor="red")
             page.snack_bar.open = True
             page.update()
 
@@ -394,18 +414,22 @@ def main(page: ft.Page):
     dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS],
                               value=app.config.get("current_provider"),
                               on_change=lambda e: refresh_settings(e.control.value))
-    tf_key = ft.TextField(label="Key", password=True);
-    tf_url = ft.TextField(label="URL");
+    tf_key = ft.TextField(label="Key", password=True)
+    tf_url = ft.TextField(label="URL")
     tf_model = ft.TextField(label="Model")
     tf_prompt = ft.TextField(label="提示词", value=app.config.get("system_prompt"), multiline=True, min_lines=3)
     refresh_settings(app.config.get("current_provider"))
+
     dlg_settings = ft.AlertDialog(title=ft.Text("设置"),
                                   content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt],
                                                     scroll=ft.ScrollMode.AUTO, height=350, width=300),
                                   actions=[ft.TextButton("保存", on_click=save_config)])
 
-    pick_dlg = ft.FilePicker(on_result=on_picked);
+    pick_dlg = ft.FilePicker(on_result=on_picked)
+
+    # 电脑端仍然需要这个 FilePicker
     save_dlg = ft.FilePicker(on_result=on_save_excel)
+
     page.overlay.extend([pick_dlg, save_dlg])
 
     header = ft.Container(
@@ -427,8 +451,18 @@ def main(page: ft.Page):
                                                          shape=ft.RoundedRectangleBorder(radius=8)))
 
     default_filename = f"检查报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+
+    # 【修复】导出按钮逻辑：根据平台分流
+    def trigger_export(e):
+        if page.platform in ["android", "ios"]:
+            # 手机端：直接调用导出逻辑，传入 None 作为事件对象，因为内部不需要 e.path
+            on_save_excel(None)
+        else:
+            # 电脑端：打开文件选择器
+            save_dlg.save_file(file_name=default_filename)
+
     btn_export = ft.ElevatedButton("导出", icon=ft.Icons.DOWNLOAD,
-                                   on_click=lambda _: save_dlg.save_file(file_name=default_filename), disabled=True,
+                                   on_click=trigger_export, disabled=True,
                                    style=ft.ButtonStyle(color="green", padding=15,
                                                         shape=ft.RoundedRectangleBorder(radius=8)))
 
@@ -471,5 +505,3 @@ def main(page: ft.Page):
 
 
 ft.app(target=main)
-
-
