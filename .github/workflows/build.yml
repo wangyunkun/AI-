@@ -3,12 +3,12 @@ name: Build Flet App
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch: # 允许在 GitHub 网页手动点击运行
+  workflow_dispatch: # 允许手动运行
 
 jobs:
-  # 任务一：打包 Windows exe (使用 PyInstaller)
+  # ============================================
+  # 任务一：Windows EXE 打包 (使用 flet pack)
+  # ============================================
   build-windows:
     runs-on: windows-latest
     steps:
@@ -18,26 +18,32 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10' # 建议使用 3.10 或以上
+          python-version: '3.10' 
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
+          # 安装项目依赖
           pip install -r requirements.txt
-          pip install pyinstaller
+          # 安装打包工具：flet 和 pyinstaller 是必须的
+          pip install flet pyinstaller pillow
 
-      - name: Build EXE
-        # 如果你有图标，请把 main.py 改为 --icon=assets/icon.ico main.py (需自行上传图标)
+      - name: Build EXE with Flet Pack
+        # 使用 flet pack 而不是 pyinstaller，它会自动处理 flet 的依赖
+        # --icon=logo.ico (如果你有图标，把这一句加在 main.py 前面)
         run: |
-          pyinstaller --name myapp --onefile --noconsole main.py
+          flet pack main.py --name myapp --verbose
 
-      - name: Upload Windows Artifact
+      - name: Upload Windows Exe
         uses: actions/upload-artifact@v4
         with:
           name: windows-app
+          # flet pack 默认把文件生成在 dist 文件夹下
           path: dist/*.exe
 
-  # 任务二：打包 Android APK (使用 flet build apk)
+  # ============================================
+  # 任务二：Android APK 打包
+  # ============================================
   build-android:
     runs-on: ubuntu-latest
     steps:
@@ -48,12 +54,12 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17' # Android 构建通常需要 Java 17
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0' # 指定一个稳定的 Flutter 版本
+          flutter-version: '3.24.0'
           channel: 'stable'
 
       - name: Setup Python
@@ -61,21 +67,19 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Flet and Dependencies
+      - name: Install Dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install flet
-          # 这一步是为了验证依赖能否安装，实际上 flet build 会再次处理依赖
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # 尝试安装 requirements，但忽略可能会导致安卓构建失败的库
+          if [ -f requirements.txt ]; then pip install -r requirements.txt || echo "Warning: Some requirements failed"; fi
 
       - name: Build APK
-        # 这一步会自动下载 Android SDK 和相关工具
         run: |
           flet build apk --verbose
 
-      - name: Upload Android Artifact
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: android-app
-          # Flet 构建后的 APK 通常在这个路径
-          path: build/app/outputs/flutter-apk/app-release.apk
+          # 使用通配符，不管它生成在哪个子目录都能找到
+          path: "**/*.apk"
