@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ============================================
-  # 任务一：Windows EXE 打包 (使用 flet pack)
+  # 任务一：Windows EXE 打包
   # ============================================
   build-windows:
     runs-on: windows-latest
@@ -23,22 +23,18 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          # 安装项目依赖
           pip install -r requirements.txt
-          # 安装打包工具：flet 和 pyinstaller 是必须的
           pip install flet pyinstaller pillow
 
       - name: Build EXE with Flet Pack
-        # 使用 flet pack 而不是 pyinstaller，它会自动处理 flet 的依赖
-        # --icon=logo.ico (如果你有图标，把这一句加在 main.py 前面)
+        # 修改点1：将 --name 修改为 SafetyCheckAI (生成的exe文件名为 SafetyCheckAI.exe)
         run: |
-          flet pack main.py --name myapp --verbose
+          flet pack main.py --name SafetyCheckAI --verbose
 
       - name: Upload Windows Exe
         uses: actions/upload-artifact@v4
         with:
           name: windows-app
-          # flet pack 默认把文件生成在 dist 文件夹下
           path: dist/*.exe
 
   # ============================================
@@ -70,16 +66,17 @@ jobs:
       - name: Install Dependencies
         run: |
           pip install flet
-          # 尝试安装 requirements，但忽略可能会导致安卓构建失败的库
-          if [ -f requirements.txt ]; then pip install -r requirements.txt || echo "Warning: Some requirements failed"; fi
+          # 确保 requirements.txt 包含 xlsxwriter, flet, openai, pandas 等
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Build APK
+        # 修改点2：添加 --product-name "安全检查AI"
+        # 这是手机安装后图标下面显示的名称
         run: |
-          flet build apk --verbose
+          flet build apk --product-name "安全检查AI" --verbose
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
           name: android-app
-          # 使用通配符，不管它生成在哪个子目录都能找到
           path: "**/*.apk"
