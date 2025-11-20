@@ -1,0 +1,4 @@
+flet
+openai
+pandas
+xlsxwriter
