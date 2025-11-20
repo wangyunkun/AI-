@@ -3,6 +3,7 @@ import base64
 import json
 import threading
 import pandas as pd
+import io
 import shutil  # <---【新增这一行】用于文件复制
 import os
 import sys  # 新增 sys 模块用于强制退出
@@ -300,20 +301,21 @@ def main(page: ft.Page):
     def on_save_excel(e):
         if not e.path: return
         
-        # 1. 获取用户选择的最终保存路径
+        # 1. 获取保存路径
         target_path = e.path
+        # 某些安卓系统返回的路径可能没有后缀，强制加上
         if not target_path.endswith(".xlsx"):
             target_path += ".xlsx"
 
         try:
-            # 2. 检查是否有数据
+            # 2. 检查数据
             if not app.current_data:
-                page.snack_bar = ft.SnackBar(ft.Text("❌ 当前没有可导出的数据"), bgcolor="red")
+                page.snack_bar = ft.SnackBar(ft.Text("❌ 无数据可导出"), bgcolor="red")
                 page.snack_bar.open = True
                 page.update()
                 return
 
-            # 3. 数据清洗与标准化
+            # 3. 数据准备
             normalized_data = []
             for item in app.current_data:
                 normalized_data.append({
@@ -329,20 +331,19 @@ def main(page: ft.Page):
             df = df[expected_cols]
 
             # =========================================================
-            # 【关键修改】安卓兼容写法：先写到内部临时文件，再复制过去
+            # 【核心修改】使用 BytesIO 在内存中生成 Excel
             # =========================================================
             
-            # 定义内部临时文件路径 (APP 一定有权限写这里)
-            temp_filename = "temp_export_report.xlsx"
-            temp_path = os.path.join(os.getcwd(), temp_filename)
+            # 创建一个内存缓冲区
+            output_buffer = io.BytesIO()
 
-            # 写入临时文件
-            with pd.ExcelWriter(temp_path, engine='xlsxwriter') as writer:
+            # 让 Pandas 写入这个内存缓冲区，而不是硬盘文件
+            with pd.ExcelWriter(output_buffer, engine='xlsxwriter') as writer:
                 df.to_excel(writer, sheet_name='排查报告', index=False, startrow=1)
                 wb = writer.book
                 ws = writer.sheets['排查报告']
                 
-                # 样式设置
+                # 定义样式
                 fmt_title = wb.add_format({'bold': True, 'font_size': 16, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1})
                 fmt_header = wb.add_format({'bold': True, 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1, 'align': 'center'})
                 fmt_body = wb.add_format({'text_wrap': True, 'valign': 'top', 'border': 1})
@@ -354,18 +355,30 @@ def main(page: ft.Page):
                 
                 for col_num, value in enumerate(df.columns.values):
                     ws.write(1, col_num, value, fmt_header)
+            
+            # 此时 Excel 已经在 output_buffer 内存里生成好了
+            # 获取所有的二进制数据
+            excel_data = output_buffer.getvalue()
 
-            # 4. 将生成的临时文件复制到用户选择的路径
-            # shutil.copy 可以很好地处理跨文件系统的流传输
-            shutil.copy(temp_path, target_path)
-
-            # 5. 清理临时文件
-            try:
-                os.remove(temp_path)
-            except:
-                pass
+            # =========================================================
+            # 4. 将二进制数据一次性写入 Android 文件
+            # =========================================================
+            with open(target_path, "wb") as f:
+                f.write(excel_data)
 
             page.snack_bar = ft.SnackBar(ft.Text(f"✅ 导出成功"), bgcolor="green")
+            page.snack_bar.open = True
+            page.update()
+
+        except Exception as err:
+            # 如果 Excel 失败，尝试降级导出 CSV (双重保险)
+            try:
+                csv_path = target_path.replace(".xlsx", ".csv")
+                df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+                page.snack_bar = ft.SnackBar(ft.Text(f"Excel失败，已降级导出为CSV"), bgcolor="orange")
+            except:
+                page.snack_bar = ft.SnackBar(ft.Text(f"导出完全失败: {str(err)}"), bgcolor="red")
+            
             page.snack_bar.open = True
             page.update()
 
@@ -458,4 +471,5 @@ def main(page: ft.Page):
 
 
 ft.app(target=main)
+
 
