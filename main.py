@@ -3,6 +3,7 @@ import base64
 import json
 import threading
 import pandas as pd
+import shutil  # <---【新增这一行】用于文件复制
 import os
 import sys  # 新增 sys 模块用于强制退出
 from datetime import datetime
@@ -38,10 +39,10 @@ DEFAULT_PROMPT = """你是一位拥有30年一线经验的**国家注册安全�
 
 请按照以下逻辑顺序，对画面进行“像素级”的排查：
 
-### 第一优先级：大型机械与特种设备（深度审查）
+### 第一优先级：大型机械与特种设备（深度审查，必须检查部分）
 1. **起重吊装**：
    - 汽车吊/履带吊：支腿是否完全伸出并垫实？吊臂下是否有人员逗留？是否有司索工/指挥人员？
-   - 吊装作业设备：是否用装载机、挖机等机械吊装？是否有违规起吊（歪拉斜吊、超载）？
+   - 吊装作业设备：是否违规用装载机、挖机等机械吊装？是否有违规起吊（歪拉斜吊、超载、使用非常规吊具）？
 2. **土方机械**：
    - 挖掘机/装载机：作业半径内是否有闲杂人员？驾驶室是否有人违规搭乘？停放位置是否在大坡度或坑边？
 3. **桩机/钻机**：
@@ -298,14 +299,21 @@ def main(page: ft.Page):
 
     def on_save_excel(e):
         if not e.path: return
-        save_path = e.path
-        if not save_path.endswith(".xlsx"):
-            save_path += ".xlsx"
+        
+        # 1. 获取用户选择的最终保存路径
+        target_path = e.path
+        if not target_path.endswith(".xlsx"):
+            target_path += ".xlsx"
 
         try:
-            if not app.current_data: raise Exception("无数据")
+            # 2. 检查是否有数据
+            if not app.current_data:
+                page.snack_bar = ft.SnackBar(ft.Text("❌ 当前没有可导出的数据"), bgcolor="red")
+                page.snack_bar.open = True
+                page.update()
+                return
 
-            # 数据标准化
+            # 3. 数据清洗与标准化
             normalized_data = []
             for item in app.current_data:
                 normalized_data.append({
@@ -313,41 +321,60 @@ def main(page: ft.Page):
                     "依据规范": item.get("regulation", "未提供"),
                     "整改建议": item.get("correction", "未提供")
                 })
-
+            
             df = pd.DataFrame(normalized_data)
-
             expected_cols = ["隐患描述", "依据规范", "整改建议"]
             for col in expected_cols:
                 if col not in df.columns: df[col] = ""
-
             df = df[expected_cols]
 
-            # 写入 Excel
-            with pd.ExcelWriter(save_path, engine='xlsxwriter') as writer:
+            # =========================================================
+            # 【关键修改】安卓兼容写法：先写到内部临时文件，再复制过去
+            # =========================================================
+            
+            # 定义内部临时文件路径 (APP 一定有权限写这里)
+            temp_filename = "temp_export_report.xlsx"
+            temp_path = os.path.join(os.getcwd(), temp_filename)
+
+            # 写入临时文件
+            with pd.ExcelWriter(temp_path, engine='xlsxwriter') as writer:
                 df.to_excel(writer, sheet_name='排查报告', index=False, startrow=1)
                 wb = writer.book
                 ws = writer.sheets['排查报告']
-
-                fmt_title = wb.add_format(
-                    {'bold': True, 'font_size': 16, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1})
-                fmt_header = wb.add_format(
-                    {'bold': True, 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1, 'align': 'center'})
+                
+                # 样式设置
+                fmt_title = wb.add_format({'bold': True, 'font_size': 16, 'align': 'center', 'bg_color': '#DDEBF7', 'border': 1})
+                fmt_header = wb.add_format({'bold': True, 'fg_color': '#4472C4', 'font_color': 'white', 'border': 1, 'align': 'center'})
                 fmt_body = wb.add_format({'text_wrap': True, 'valign': 'top', 'border': 1})
 
                 ws.merge_range('A1:C1', 'AI 安全检查报告', fmt_title)
                 ws.set_column('A:A', 40, fmt_body)
                 ws.set_column('B:B', 30, fmt_body)
                 ws.set_column('C:C', 50, fmt_body)
-
+                
                 for col_num, value in enumerate(df.columns.values):
                     ws.write(1, col_num, value, fmt_header)
 
-            page.snack_bar = ft.SnackBar(ft.Text(f"已导出: {os.path.basename(save_path)}"));
-            page.snack_bar.open = True;
+            # 4. 将生成的临时文件复制到用户选择的路径
+            # shutil.copy 可以很好地处理跨文件系统的流传输
+            shutil.copy(temp_path, target_path)
+
+            # 5. 清理临时文件
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+
+            page.snack_bar = ft.SnackBar(ft.Text(f"✅ 导出成功"), bgcolor="green")
+            page.snack_bar.open = True
             page.update()
+
         except Exception as err:
-            page.snack_bar = ft.SnackBar(ft.Text(f"导出失败: {str(err)}"), bgcolor="red");
-            page.snack_bar.open = True;
+            # 打印详细错误到界面，方便调试
+            error_msg = f"导出失败: {str(err)}"
+            print(error_msg) # 打印到控制台
+            page.snack_bar = ft.SnackBar(ft.Text(error_msg), bgcolor="red")
+            page.snack_bar.open = True
             page.update()
 
     # ================= 布局组装 =================
@@ -431,3 +458,4 @@ def main(page: ft.Page):
 
 
 ft.app(target=main)
+
