@@ -4,13 +4,11 @@ import json
 import threading
 import pandas as pd
 import os
-import sys
 import io
-import shutil  # 用于文件复制
 from datetime import datetime
 from openai import OpenAI
 
-# ================= 1. 预设配置 =================
+# ================= 1. 预设配置 (保持不变) =================
 PROVIDER_PRESETS = {
     "阿里百炼 (Alibaba)": {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -27,6 +25,11 @@ PROVIDER_PRESETS = {
         "model": "deepseek-chat",
         "api_key": ""
     },
+    "火山引擎 (豆包)": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "model": "doubao-pro-4k-vl",
+        "api_key": ""
+    },
     "自定义 (Custom)": {
         "base_url": "",
         "model": "",
@@ -34,18 +37,63 @@ PROVIDER_PRESETS = {
     }
 }
 
-DEFAULT_PROMPT = """你是一位拥有30年一线经验的**国家注册安全工程师**。
-你的任务是审查施工现场照片，重点针对**施工机械**、**工艺规范**及**EHS风险**进行排查。
+DEFAULT_PROMPT = """你是一位拥有30年一线经验的**国家注册安全工程师**及**工程质量监理专家**。你的眼神如鹰隼般锐利，绝不放过任何一个细微的安全隐患或违规施工行为。
 
-请按照以下格式返回纯净的 JSON 列表（不要使用Markdown代码块）：
+你的任务是审查施工现场照片，重点针对**施工机械使用**、**施工工艺规范**以及**通用安全风险**进行全方位扫描。
+
+请按照以下逻辑顺序，对画面进行“像素级”的排查：
+
+### 第一优先级：大型机械与特种设备（深度审查）
+1. **起重吊装**：
+   - 汽车吊/履带吊：支腿是否完全伸出并垫实？吊臂下是否有人员逗留？是否有司索工/指挥人员？安全管理人员是否在场？
+   - 吊装作业设备：是否违章用装载机、挖机等机械进行吊装？是否有违规起吊（歪拉斜吊、超载、非标准吊具）？
+2. **土方机械**：
+   - 挖掘机/装载机：作业半径内是否有闲杂人员？驾驶室是否有人违规搭乘？停放位置是否在大坡度或坑边？
+3. **桩机/钻机**：
+   - 设备是否稳固？电缆是否拖地浸水？
+
+### 第二优先级：施工工艺与临时设施（专业审查）
+1. **脚手架与模板支撑**：
+   - 立杆是否垂直？是否有扫地杆？剪刀撑是否连续设置？脚手板是否铺满且固定？
+   - **违规判定**：严禁钢管与木方混用、严禁缺少底座。
+2. **临电作业**：
+   - 是否落实“一机一闸一漏一箱”？配电箱门是否关闭？电缆是否乱拉乱接或经过通道未防护？
+3. **高处作业与临边**：
+   - “四口五临边”是否有防护栏杆？安全网是否挂设严密？作业平台是否稳固？
+
+### 第三优先级：人员行为与文明施工（基础审查）
+1. **个人防护 (PPE)**：
+   - 安全帽（必须系下颌带）、反光衣、高处作业必须系挂五点式安全带（高挂低用）。
+2. **消防与动火**：
+   - 气瓶是否防倾倒？氧气/乙炔间距是否足够（5米）？动火点旁是否有灭火器？临时配电箱是否规范？
+3. **文明施工**：
+   - 材料是否分类堆放？裸土是否覆盖？路面是否积水或泥泞？
+
+---
+
+### 输出规则（极其重要）
+
+1. **引用标准**：在指出问题时，请尽量匹配最精确的中国国标或行标。
+   - 机械类参考：GB 6067《起重机械安全规程》、JGJ 33《建筑机械使用安全技术规程》。
+   - 施工类参考：JGJ 59《建筑施工安全检查标准》、JGJ 130《扣件式钢管脚手架安全技术规范》、GB 50194《建设工程施工现场供用电安全规范》。
+2. **数量统计**：如果同一类问题出现多次（如3人未戴头盔），请合并为一条，但要说明数量。
+3. **宁严勿漏**：对于模糊不清的隐患，用“疑似”字样指出，提示人工复核。
+
+请返回纯净的 JSON 列表（无 Markdown 标记），格式如下：
 [
     {
-        "issue": "隐患描述内容",
-        "regulation": "违反的规范名称",
-        "correction": "具体的整改建议"
+        "issue": "【机械】挖掘机作业半径内有2名工人违规穿越，且无人指挥",
+        "regulation": "违反《建筑机械使用安全技术规程》JGJ 33-2012 第x条",
+        "correction": "立即停止作业，设置警戒隔离区，配备专职指挥人员"
+    },
+    {
+        "issue": "【工艺】落地式脚手架纵向剪刀撑未连续设置，且立杆悬空",
+        "regulation": "违反《建筑施工扣件式钢管脚手架安全技术规范》JGJ 130-2011",
+        "correction": "立即整改，补齐剪刀撑，立杆底部增设垫板和底座"
     }
 ]
-如果未发现问题，返回 []。
+
+如果未发现任何问题，返回 []。
 """
 
 CONFIG_FILE = "app_config_final.json"
@@ -57,6 +105,8 @@ class SafetyApp:
         self.current_image_path = None
         self.current_data = []
         self.client = None
+        # 用于暂存生成的 Excel 二进制数据
+        self.pending_excel_bytes = None
 
     def load_config(self):
         default = {"current_provider": "阿里百炼 (Alibaba)", "system_prompt": DEFAULT_PROMPT,
@@ -90,23 +140,94 @@ class SafetyApp:
             return True
         return False
 
+    # ================= 新增：生成美化的 Excel 数据流 =================
+    def generate_styled_excel(self):
+        if not self.current_data:
+            return None
+
+        # 1. 数据准备
+        normalized_data = []
+        for i, item in enumerate(self.current_data):
+            normalized_data.append({
+                "序号": i + 1,
+                "隐患描述": item.get("issue", "无"),
+                "依据规范": item.get("regulation", "无"),
+                "整改建议": item.get("correction", "无")
+            })
+        df = pd.DataFrame(normalized_data)
+
+        # 2. 使用 BytesIO 在内存中生成文件，不写死路径
+        output = io.BytesIO()
+
+        # 3. 使用 xlsxwriter 引擎进行样式定制
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            # 留出前2行用于写大标题和副标题，数据从第3行开始写（索引为2）
+            df.to_excel(writer, sheet_name='排查报告', startrow=2, index=False)
+
+            workbook = writer.book
+            worksheet = writer.sheets['排查报告']
+
+            # 定义样式
+            # 标题样式：加粗、大号、居中、蓝色
+            title_format = workbook.add_format({
+                'bold': True, 'font_size': 20, 'align': 'center', 'valign': 'vcenter',
+                'fg_color': '#E6F3FF', 'border': 1
+            })
+            # 表头样式：加粗、白色文字、深蓝背景
+            header_format = workbook.add_format({
+                'bold': True, 'text_wrap': True, 'valign': 'top', 'align': 'center',
+                'fg_color': '#0070C0', 'font_color': 'white', 'border': 1
+            })
+            # 正文样式：自动换行、左对齐、边框
+            body_format = workbook.add_format({
+                'text_wrap': True, 'valign': 'top', 'align': 'left', 'border': 1
+            })
+            # 序号样式：居中
+            center_format = workbook.add_format({
+                'text_wrap': True, 'valign': 'top', 'align': 'center', 'border': 1
+            })
+
+            # 写入合并的大标题
+            worksheet.merge_range('A1:D1', '普洱版纳区域质量安全检查报告', title_format)
+            # 写入生成时间作为副标题
+            time_str = f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            worksheet.merge_range('A2:D2', time_str,
+                                  workbook.add_format({'align': 'right', 'italic': True, 'font_color': 'gray'}))
+
+            # 设置列宽
+            worksheet.set_column('A:A', 6, center_format)  # 序号
+            worksheet.set_column('B:B', 40, body_format)  # 隐患描述
+            worksheet.set_column('C:C', 30, body_format)  # 依据规范
+            worksheet.set_column('D:D', 40, body_format)  # 整改建议
+
+            # 覆盖 pandas 默认的表头样式
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(2, col_num, value, header_format)
+
+        output.seek(0)
+        return output.getvalue()
+
 
 def main(page: ft.Page):
     # ================= 页面设置 =================
-    page.title = "安全检查AI助理"
+    page.title = "普洱版纳区域质量安全部-测试版"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = "#f2f4f7"
-    page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
 
+    # 适配手机端布局
     page.window.width = 1200
     page.window.height = 850
-    page.window.min_width = 380
-    page.window.min_height = 600
 
     app = SafetyApp()
 
-    # ================= 详情抽屉 =================
+    # ================= 详情抽屉 (保持 UI 不变) =================
+    bs_content = ft.Column(scroll=ft.ScrollMode.AUTO, tight=True)
+    bs = ft.BottomSheet(content=ft.Container(content=bs_content, padding=20,
+                                             border_radius=ft.border_radius.only(top_left=15, top_right=15)),
+                        dismissible=True)
+    page.overlay.append(bs)
+
     def show_bottom_sheet(item):
         bs_content.controls = [
             ft.Container(height=10),
@@ -129,12 +250,6 @@ def main(page: ft.Page):
         ]
         bs.open = True
         page.update()
-
-    bs_content = ft.Column(scroll=ft.ScrollMode.AUTO, tight=True)
-    bs = ft.BottomSheet(content=ft.Container(content=bs_content, padding=20,
-                                             border_radius=ft.border_radius.only(top_left=15, top_right=15)),
-                        dismissible=True)
-    page.overlay.append(bs)
 
     # ================= 列表渲染 =================
     result_column = ft.Column(spacing=10)
@@ -173,7 +288,7 @@ def main(page: ft.Page):
     img_container = ft.Container(content=img_control, height=250, bgcolor=ft.Colors.BLACK12, border_radius=10,
                                  alignment=ft.alignment.center)
 
-    # ================= 核心逻辑 =================
+    # ================= 逻辑处理 =================
     def save_config(e):
         p = dd_provider.value
         app.config["current_provider"] = p
@@ -192,12 +307,12 @@ def main(page: ft.Page):
         tf_model.value = conf.get("model", "")
         tf_key.value = conf.get("api_key", "")
         page.update()
-    
+
     def on_exit_app(e):
-        try:
+        if page.platform in ["android", "ios"]:
+            os._exit(0)
+        else:
             page.window.close()
-        except:
-            sys.exit(0)
 
     def run_task(e):
         if not app.init_client():
@@ -235,6 +350,7 @@ def main(page: ft.Page):
             except Exception as err:
                 status_txt.value = f"❌ {str(err)[:20]}"
                 status_txt.color = "red"
+                btn_analyze.text = "重新分析"
                 btn_analyze.disabled = False
                 page.update()
 
@@ -249,101 +365,50 @@ def main(page: ft.Page):
             btn_analyze.disabled = False
             page.update()
 
-    # ================= 【核心】安卓兼容导出逻辑 =================
-    def on_save_excel(e):
-        """
-        终极导出方案：
-        1. 在 APP 私有目录生成 (100% 有权限，不会是0KB)。
-        2. 复制到 /storage/emulated/0/Download/ (公共目录)。
-        3. 同时生成 Excel 和 TXT 两个文件，确保至少有一个能看。
-        """
+    # ================= 统一的导出逻辑 (修复 Android 问题) =================
+
+    # 1. 用户点击导出 -> 准备数据 -> 打开文件保存对话框
+    def trigger_export(e):
         try:
-            if not app.current_data:
-                raise Exception("无数据")
+            # 预先在内存中生成 Excel 二进制流
+            excel_bytes = app.generate_styled_excel()
+            if not excel_bytes:
+                status_txt.value = "❌ 无数据可导出"
+                page.update()
+                return
 
-            # 1. 准备数据
-            normalized_data = []
-            txt_content = "=== 安全隐患排查报告 ===\n\n"
-            txt_content += f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-            txt_content += "-" * 30 + "\n"
+            app.pending_excel_bytes = excel_bytes  # 存入实例变量供回调使用
 
-            for i, item in enumerate(app.current_data):
-                issue = item.get("issue", "无")
-                reg = item.get("regulation", "无")
-                corr = item.get("correction", "无")
-                
-                normalized_data.append({
-                    "隐患描述": issue,
-                    "依据规范": reg,
-                    "整改建议": corr
-                })
-                txt_content += f"【隐患 {i+1}】\n描述: {issue}\n规范: {reg}\n整改: {corr}\n\n"
+            # 生成默认文件名
+            filename = f"安全排查报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
 
-            df = pd.DataFrame(normalized_data)
-            
-            # 2. 定义文件名 (使用时间戳防止覆盖)
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename_xlsx = f"安全报告_{timestamp}.xlsx"
-            filename_txt = f"安全报告_{timestamp}.txt"
-
-            # 3. 【关键步骤】先保存到 APP 内部私有目录 (这里绝对可写)
-            # os.environ["TMPDIR"] 在安卓上指向缓存目录，是安全的
-            private_dir = os.getenv("TMPDIR", os.getcwd()) 
-            private_path_xlsx = os.path.join(private_dir, filename_xlsx)
-            private_path_txt = os.path.join(private_dir, filename_txt)
-
-            # 写入 Excel 到私有目录
-            with pd.ExcelWriter(private_path_xlsx, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='排查报告', index=False)
-                # 简单的样式
-                wb = writer.book
-                ws = writer.sheets['排查报告']
-                fmt = wb.add_format({'text_wrap': True, 'border': 1})
-                ws.set_column('A:C', 30, fmt)
-
-            # 写入 TXT 到私有目录 (双重保险)
-            with open(private_path_txt, "w", encoding="utf-8") as f:
-                f.write(txt_content)
-
-            # 4. 【关键步骤】将私有目录的文件 复制 到公共 Download 目录
-            is_mobile = page.platform in ["android", "ios"]
-            
-            if is_mobile:
-                public_dir = "/storage/emulated/0/Download"
-                final_path_xlsx = os.path.join(public_dir, filename_xlsx)
-                final_path_txt = os.path.join(public_dir, filename_txt)
-
-                # 使用 shutil 复制，比 open() 写入更稳健
-                try:
-                    shutil.copy(private_path_xlsx, final_path_xlsx)
-                    shutil.copy(private_path_txt, final_path_txt)
-                    
-                    # 成功弹窗
-                    dlg_success = ft.AlertDialog(
-                        title=ft.Text("导出成功"),
-                        content=ft.Text(f"报告已保存至【下载/Download】文件夹！\n\nExcel: {filename_xlsx}\n文本: {filename_txt}", size=16),
-                        actions=[ft.TextButton("确定", on_click=lambda e: page.close(dlg_success))]
-                    )
-                    page.open(dlg_success)
-
-                except Exception as e_copy:
-                    # 如果复制失败，说明权限被拒，告诉用户去私有目录找
-                    raise Exception(f"无法写入下载目录，文件保留在: {private_path_xlsx}\n错误: {e_copy}")
-            
-            else:
-                # 电脑端逻辑 (FilePicker)
-                if hasattr(e, "path") and e.path:
-                     shutil.copy(private_path_xlsx, e.path)
-                     page.snack_bar = ft.SnackBar(ft.Text("✅ 导出成功"), bgcolor="green")
-                     page.snack_bar.open = True
-
-            page.update()
+            # 调用 Flet 原生的文件保存对话框
+            # 在 Android 上，这会唤起系统文件选择器，允许用户选择保存位置
+            save_dlg.save_file(file_name=filename, allowed_extensions=["xlsx"])
 
         except Exception as err:
-            page.snack_bar = ft.SnackBar(ft.Text(f"导出失败: {str(err)}"), bgcolor="red")
+            page.snack_bar = ft.SnackBar(ft.Text(f"准备导出失败: {str(err)}"), bgcolor="red")
             page.snack_bar.open = True
             page.update()
 
+    # 2. 用户选择路径后 -> 实际写入文件
+    def on_save_result(e: ft.FilePickerResultEvent):
+        if e.path and app.pending_excel_bytes:
+            try:
+                # 只要 FilePicker 返回了路径，该路径就是可写的（OS 授予了权限）
+                with open(e.path, "wb") as f:
+                    f.write(app.pending_excel_bytes)
+
+                page.snack_bar = ft.SnackBar(ft.Text(f"✅ 报告已导出至: {e.path}"), bgcolor="green")
+                page.snack_bar.open = True
+
+                # 清理内存
+                app.pending_excel_bytes = None
+                page.update()
+            except Exception as err:
+                page.snack_bar = ft.SnackBar(ft.Text(f"写入文件失败: {str(err)}"), bgcolor="red")
+                page.snack_bar.open = True
+                page.update()
 
     # ================= 布局组装 =================
     dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS],
@@ -354,20 +419,22 @@ def main(page: ft.Page):
     tf_model = ft.TextField(label="Model")
     tf_prompt = ft.TextField(label="提示词", value=app.config.get("system_prompt"), multiline=True, min_lines=3)
     refresh_settings(app.config.get("current_provider"))
-    
+
     dlg_settings = ft.AlertDialog(title=ft.Text("设置"),
                                   content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt],
                                                     scroll=ft.ScrollMode.AUTO, height=350, width=300),
                                   actions=[ft.TextButton("保存", on_click=save_config)])
 
+    # 初始化文件选择器
     pick_dlg = ft.FilePicker(on_result=on_picked)
-    save_dlg = ft.FilePicker(on_result=on_save_excel)
-    
+    # 初始化保存对话框 (这是修复安卓问题的关键)
+    save_dlg = ft.FilePicker(on_result=on_save_result)
+
     page.overlay.extend([pick_dlg, save_dlg])
 
     header = ft.Container(
         content=ft.Row([
-            ft.Text("🛡️ 安全检查AI助理", size=18, weight="bold"),
+            ft.Text("🛡️ 普洱版纳区域质量安全AI助理", size=18, weight="bold"),
             ft.Row([
                 ft.IconButton(ft.Icons.SETTINGS, tooltip="设置", on_click=lambda e: page.open(dlg_settings)),
                 ft.IconButton(ft.Icons.EXIT_TO_APP, tooltip="退出系统", icon_color="red", on_click=on_exit_app)
@@ -383,15 +450,7 @@ def main(page: ft.Page):
                                     style=ft.ButtonStyle(bgcolor="blue", color="white", padding=15,
                                                          shape=ft.RoundedRectangleBorder(radius=8)))
 
-    default_filename = f"安全报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-    
-    # 触发逻辑：手机直接运行，电脑弹窗
-    def trigger_export(e):
-        if page.platform in ["android", "ios"]:
-            on_save_excel(None)
-        else:
-            save_dlg.save_file(file_name=default_filename)
-
+    # 绑定新的导出逻辑
     btn_export = ft.ElevatedButton("导出报告", icon=ft.Icons.DOWNLOAD,
                                    on_click=trigger_export, disabled=True,
                                    style=ft.ButtonStyle(color="green", padding=15,
