@@ -2,16 +2,13 @@ import flet as ft
 import base64
 import json
 import threading
+import pandas as pd
 import os
 import sys
 import io
+import shutil  # 用于文件复制
 from datetime import datetime
 from openai import OpenAI
-# 引入 word 操作库
-from docx import Document
-from docx.shared import Pt, Inches
-from docx.oxml.ns import qn
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 
 # ================= 1. 预设配置 =================
 PROVIDER_PRESETS = {
@@ -102,7 +99,6 @@ def main(page: ft.Page):
     page.padding = 0
     page.scroll = ft.ScrollMode.AUTO
 
-    # 适配 Flet 0.21+
     page.window.width = 1200
     page.window.height = 850
     page.window.min_width = 380
@@ -177,7 +173,7 @@ def main(page: ft.Page):
     img_container = ft.Container(content=img_control, height=250, bgcolor=ft.Colors.BLACK12, border_radius=10,
                                  alignment=ft.alignment.center)
 
-    # ================= 逻辑 =================
+    # ================= 核心逻辑 =================
     def save_config(e):
         p = dd_provider.value
         app.config["current_provider"] = p
@@ -253,67 +249,94 @@ def main(page: ft.Page):
             btn_analyze.disabled = False
             page.update()
 
-    # ================= 【终极版】Word 导出逻辑 =================
-    def on_save_word_result(e):
+    # ================= 【核心】安卓兼容导出逻辑 =================
+    def on_save_excel(e):
         """
-        FilePicker 的回调函数。
-        无论在电脑还是手机，都通过这个回调来写入文件。
+        终极导出方案：
+        1. 在 APP 私有目录生成 (100% 有权限，不会是0KB)。
+        2. 复制到 /storage/emulated/0/Download/ (公共目录)。
+        3. 同时生成 Excel 和 TXT 两个文件，确保至少有一个能看。
         """
-        if not e.path:
-            return
-            
-        target_path = e.path
-        # 强制修正后缀
-        if not target_path.endswith(".docx"):
-            target_path += ".docx"
-
         try:
             if not app.current_data:
                 raise Exception("无数据")
 
-            # --- 1. 内存中生成 Word ---
-            doc = Document()
+            # 1. 准备数据
+            normalized_data = []
+            txt_content = "=== 安全隐患排查报告 ===\n\n"
+            txt_content += f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            txt_content += "-" * 30 + "\n"
+
+            for i, item in enumerate(app.current_data):
+                issue = item.get("issue", "无")
+                reg = item.get("regulation", "无")
+                corr = item.get("correction", "无")
+                
+                normalized_data.append({
+                    "隐患描述": issue,
+                    "依据规范": reg,
+                    "整改建议": corr
+                })
+                txt_content += f"【隐患 {i+1}】\n描述: {issue}\n规范: {reg}\n整改: {corr}\n\n"
+
+            df = pd.DataFrame(normalized_data)
             
-            # 中文兼容设置
-            doc.styles['Normal'].font.name = u'Arial'
-            doc.styles['Normal']._element.rPr.rFonts.set(qn('w:eastAsia'), u'SimSun') # 宋体
+            # 2. 定义文件名 (使用时间戳防止覆盖)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename_xlsx = f"安全报告_{timestamp}.xlsx"
+            filename_txt = f"安全报告_{timestamp}.txt"
 
-            # 标题
-            heading = doc.add_heading('安全隐患排查报告', 0)
-            heading.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+            # 3. 【关键步骤】先保存到 APP 内部私有目录 (这里绝对可写)
+            # os.environ["TMPDIR"] 在安卓上指向缓存目录，是安全的
+            private_dir = os.getenv("TMPDIR", os.getcwd()) 
+            private_path_xlsx = os.path.join(private_dir, filename_xlsx)
+            private_path_txt = os.path.join(private_dir, filename_txt)
+
+            # 写入 Excel 到私有目录
+            with pd.ExcelWriter(private_path_xlsx, engine='xlsxwriter') as writer:
+                df.to_excel(writer, sheet_name='排查报告', index=False)
+                # 简单的样式
+                wb = writer.book
+                ws = writer.sheets['排查报告']
+                fmt = wb.add_format({'text_wrap': True, 'border': 1})
+                ws.set_column('A:C', 30, fmt)
+
+            # 写入 TXT 到私有目录 (双重保险)
+            with open(private_path_txt, "w", encoding="utf-8") as f:
+                f.write(txt_content)
+
+            # 4. 【关键步骤】将私有目录的文件 复制 到公共 Download 目录
+            is_mobile = page.platform in ["android", "ios"]
             
-            doc.add_paragraph(f"排查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-            doc.add_paragraph(f"隐患总数: {len(app.current_data)} 项")
-            doc.add_paragraph("-" * 20)
+            if is_mobile:
+                public_dir = "/storage/emulated/0/Download"
+                final_path_xlsx = os.path.join(public_dir, filename_xlsx)
+                final_path_txt = os.path.join(public_dir, filename_txt)
 
-            # 表格
-            table = doc.add_table(rows=1, cols=3)
-            table.style = 'Table Grid'
+                # 使用 shutil 复制，比 open() 写入更稳健
+                try:
+                    shutil.copy(private_path_xlsx, final_path_xlsx)
+                    shutil.copy(private_path_txt, final_path_txt)
+                    
+                    # 成功弹窗
+                    dlg_success = ft.AlertDialog(
+                        title=ft.Text("导出成功"),
+                        content=ft.Text(f"报告已保存至【下载/Download】文件夹！\n\nExcel: {filename_xlsx}\n文本: {filename_txt}", size=16),
+                        actions=[ft.TextButton("确定", on_click=lambda e: page.close(dlg_success))]
+                    )
+                    page.open(dlg_success)
+
+                except Exception as e_copy:
+                    # 如果复制失败，说明权限被拒，告诉用户去私有目录找
+                    raise Exception(f"无法写入下载目录，文件保留在: {private_path_xlsx}\n错误: {e_copy}")
             
-            hdr = table.rows[0].cells
-            hdr[0].text = '隐患描述'
-            hdr[1].text = '依据规范'
-            hdr[2].text = '整改建议'
+            else:
+                # 电脑端逻辑 (FilePicker)
+                if hasattr(e, "path") and e.path:
+                     shutil.copy(private_path_xlsx, e.path)
+                     page.snack_bar = ft.SnackBar(ft.Text("✅ 导出成功"), bgcolor="green")
+                     page.snack_bar.open = True
 
-            for item in app.current_data:
-                row = table.add_row().cells
-                row[0].text = item.get("issue", "")
-                row[1].text = item.get("regulation", "")
-                row[2].text = item.get("correction", "")
-
-            # 保存到内存流
-            buffer = io.BytesIO()
-            doc.save(buffer)
-            word_bytes = buffer.getvalue()
-
-            # --- 2. 强制写入文件系统 (防止0KB) ---
-            with open(target_path, "wb") as f:
-                f.write(word_bytes)
-                f.flush()       # 强制刷新缓冲区
-                os.fsync(f.fileno()) # 强制同步到物理存储
-
-            page.snack_bar = ft.SnackBar(ft.Text(f"✅ 导出成功"), bgcolor="green")
-            page.snack_bar.open = True
             page.update()
 
         except Exception as err:
@@ -338,9 +361,7 @@ def main(page: ft.Page):
                                   actions=[ft.TextButton("保存", on_click=save_config)])
 
     pick_dlg = ft.FilePicker(on_result=on_picked)
-    
-    # 【关键】保存对话框，电脑和手机通用
-    save_dlg = ft.FilePicker(on_result=on_save_word_result)
+    save_dlg = ft.FilePicker(on_result=on_save_excel)
     
     page.overlay.extend([pick_dlg, save_dlg])
 
@@ -362,14 +383,18 @@ def main(page: ft.Page):
                                     style=ft.ButtonStyle(bgcolor="blue", color="white", padding=15,
                                                          shape=ft.RoundedRectangleBorder(radius=8)))
 
-    # 默认文件名
-    default_filename = f"排查报告_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"
+    default_filename = f"安全报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    
+    # 触发逻辑：手机直接运行，电脑弹窗
+    def trigger_export(e):
+        if page.platform in ["android", "ios"]:
+            on_save_excel(None)
+        else:
+            save_dlg.save_file(file_name=default_filename)
 
-    # 导出按钮：在所有平台都调用 save_dlg
-    btn_export = ft.ElevatedButton("导出报告", icon=ft.Icons.DESCRIPTION,
-                                   on_click=lambda _: save_dlg.save_file(file_name=default_filename, allowed_extensions=["docx"]), 
-                                   disabled=True,
-                                   style=ft.ButtonStyle(color="purple", padding=15,
+    btn_export = ft.ElevatedButton("导出报告", icon=ft.Icons.DOWNLOAD,
+                                   on_click=trigger_export, disabled=True,
+                                   style=ft.ButtonStyle(color="green", padding=15,
                                                         shape=ft.RoundedRectangleBorder(radius=8)))
 
     layout = ft.ResponsiveRow([
