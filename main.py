@@ -97,10 +97,7 @@ class SafetyApp:
         return False
 
     def get_excel_bytes(self):
-        """
-        修改：直接返回 BytesIO 对象，而不是 Base64 字符串
-        方便后续直接写入文件
-        """
+        
         if not self.current_data:
             return None
 
@@ -115,12 +112,19 @@ class SafetyApp:
         df = pd.DataFrame(normalized_data)
 
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        
+        # ===========================================================
+        # 【关键修复】添加 engine_kwargs={'options': {'in_memory': True}}
+        # 这会禁止 XlsxWriter 尝试访问 Android 的 /tmp 目录
+        # ===========================================================
+        with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'in_memory': True}}) as writer:
+            # 留出前2行写标题
             df.to_excel(writer, sheet_name='排查报告', startrow=2, index=False)
+
             workbook = writer.book
             worksheet = writer.sheets['排查报告']
 
-            # 样式定义
+            # --- 定义样式 ---
             title_format = workbook.add_format({
                 'bold': True, 'font_size': 18, 'align': 'center', 'valign': 'vcenter',
                 'fg_color': '#E6F3FF', 'border': 1
@@ -136,21 +140,24 @@ class SafetyApp:
                 'text_wrap': True, 'valign': 'top', 'align': 'center', 'border': 1
             })
 
-            # 写入内容
+            # --- 写入内容 ---
             worksheet.merge_range('A1:D1', '普洱版纳区域质量安全检查报告', title_format)
             time_str = f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
             worksheet.merge_range('A2:D2', time_str,
                                   workbook.add_format({'align': 'right', 'italic': True, 'font_color': '#666666'}))
 
+            # 设置列宽
             worksheet.set_column('A:A', 6, center_format)
             worksheet.set_column('B:B', 40, body_format)
             worksheet.set_column('C:C', 30, body_format)
             worksheet.set_column('D:D', 40, body_format)
 
+            # 重写表头
             headers = df.columns.values
             for col_num, value in enumerate(headers):
                 worksheet.write(2, col_num, value, header_format)
 
+        # 重要：确保指针回到开头
         output.seek(0)
         return output
 
@@ -452,3 +459,4 @@ def main(page: ft.Page):
 
 
 ft.app(target=main)
+
