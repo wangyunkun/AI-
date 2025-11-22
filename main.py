@@ -2,10 +2,8 @@ import flet as ft
 import base64
 import json
 import threading
-import pandas as pd
-import io
 import os
-from datetime import datetime
+import copy
 from openai import OpenAI
 
 # ================= 1. 预设配置 =================
@@ -51,41 +49,49 @@ class SafetyApp:
 
     def load_config(self):
         """
-        修复点1：使用 client_storage 读取配置，适配 Android 持久化
+        读取配置 (修复 persistence 问题)
         """
-        default = {
+        # 使用 deepcopy 确保默认值不被引用修改
+        default_config = {
             "current_provider": "阿里百炼 (Alibaba)",
             "system_prompt": DEFAULT_PROMPT,
-            "providers": PROVIDER_PRESETS
+            "providers": copy.deepcopy(PROVIDER_PRESETS)
         }
 
         try:
-            # 从本地存储读取
-            saved = self.page.client_storage.get("app_config")
-            if not saved:
-                return default
+            # 尝试从手机安全存储中读取
+            if self.page.client_storage.contains_key("app_config"):
+                saved = self.page.client_storage.get("app_config")
 
-            # 合并新旧配置，防止key缺失
-            if "providers" not in saved:
-                saved["providers"] = PROVIDER_PRESETS
+                # 简单的校验，防止空数据
+                if not saved or not isinstance(saved, dict):
+                    return default_config
+
+                # 补全可能缺失的新字段
+                if "providers" not in saved:
+                    saved["providers"] = copy.deepcopy(PROVIDER_PRESETS)
+                else:
+                    # 如果预设里有新厂商，补全到存档里
+                    for k, v in PROVIDER_PRESETS.items():
+                        if k not in saved["providers"]:
+                            saved["providers"][k] = v
+
+                return saved
             else:
-                for k, v in PROVIDER_PRESETS.items():
-                    if k not in saved["providers"]:
-                        saved["providers"][k] = v
-            return saved
+                return default_config
         except Exception as e:
-            print(f"Config Load Error: {e}")
-            return default
+            print(f"读取配置失败: {e}")
+            return default_config
 
     def save_config_storage(self):
         """
-        修复点2：使用 client_storage 保存配置
+        保存配置到手机存储
         """
         try:
             self.page.client_storage.set("app_config", self.config)
             return True
         except Exception as e:
-            print(f"Config Save Error: {e}")
+            print(f"保存配置失败: {e}")
             return False
 
     def init_client(self):
@@ -96,71 +102,6 @@ class SafetyApp:
             return True
         return False
 
-    def get_excel_bytes(self):
-        
-        if not self.current_data:
-            return None
-
-        normalized_data = []
-        for i, item in enumerate(self.current_data):
-            normalized_data.append({
-                "序号": i + 1,
-                "隐患描述": item.get("issue", "无"),
-                "依据规范": item.get("regulation", "无"),
-                "整改建议": item.get("correction", "无")
-            })
-        df = pd.DataFrame(normalized_data)
-
-        output = io.BytesIO()
-        
-        # ===========================================================
-        # 【关键修复】添加 engine_kwargs={'options': {'in_memory': True}}
-        # 这会禁止 XlsxWriter 尝试访问 Android 的 /tmp 目录
-        # ===========================================================
-        with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'in_memory': True}}) as writer:
-            # 留出前2行写标题
-            df.to_excel(writer, sheet_name='排查报告', startrow=2, index=False)
-
-            workbook = writer.book
-            worksheet = writer.sheets['排查报告']
-
-            # --- 定义样式 ---
-            title_format = workbook.add_format({
-                'bold': True, 'font_size': 18, 'align': 'center', 'valign': 'vcenter',
-                'fg_color': '#E6F3FF', 'border': 1
-            })
-            header_format = workbook.add_format({
-                'bold': True, 'text_wrap': True, 'valign': 'top', 'align': 'center',
-                'fg_color': '#0070C0', 'font_color': 'white', 'border': 1
-            })
-            body_format = workbook.add_format({
-                'text_wrap': True, 'valign': 'top', 'align': 'left', 'border': 1
-            })
-            center_format = workbook.add_format({
-                'text_wrap': True, 'valign': 'top', 'align': 'center', 'border': 1
-            })
-
-            # --- 写入内容 ---
-            worksheet.merge_range('A1:D1', '普洱版纳区域质量安全检查报告', title_format)
-            time_str = f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            worksheet.merge_range('A2:D2', time_str,
-                                  workbook.add_format({'align': 'right', 'italic': True, 'font_color': '#666666'}))
-
-            # 设置列宽
-            worksheet.set_column('A:A', 6, center_format)
-            worksheet.set_column('B:B', 40, body_format)
-            worksheet.set_column('C:C', 30, body_format)
-            worksheet.set_column('D:D', 40, body_format)
-
-            # 重写表头
-            headers = df.columns.values
-            for col_num, value in enumerate(headers):
-                worksheet.write(2, col_num, value, header_format)
-
-        # 重要：确保指针回到开头
-        output.seek(0)
-        return output
-
 
 def main(page: ft.Page):
     # ================= 页面设置 =================
@@ -169,7 +110,7 @@ def main(page: ft.Page):
     page.bgcolor = "#f2f4f7"
     page.scroll = ft.ScrollMode.AUTO
 
-    # 初始化App逻辑 (传入page以使用存储)
+    # 初始化逻辑
     app = SafetyApp(page)
 
     # ================= 详情抽屉 =================
@@ -242,15 +183,18 @@ def main(page: ft.Page):
     # ================= 逻辑处理 =================
     def save_config_ui(e):
         p = dd_provider.value
+        # 更新内存中的配置
         app.config["current_provider"] = p
         app.config["system_prompt"] = tf_prompt.value
         app.config["providers"][p]["base_url"] = tf_url.value.strip()
         app.config["providers"][p]["model"] = tf_model.value.strip()
         app.config["providers"][p]["api_key"] = tf_key.value.strip()
 
-        # 使用新的保存方法
+        # 保存到手机存储
         if app.save_config_storage():
-            status_txt.value = "✅ 配置已保存 (Storage)"
+            status_txt.value = "✅ 配置已保存"
+            page.snack_bar = ft.SnackBar(ft.Text("配置已保存，重启后依然有效"), bgcolor="green")
+            page.snack_bar.open = True
         else:
             status_txt.value = "❌ 保存失败"
 
@@ -258,6 +202,7 @@ def main(page: ft.Page):
         page.update()
 
     def refresh_settings(val):
+        """刷新设置弹窗中的输入框数值"""
         conf = app.config["providers"].get(val, {})
         tf_url.value = conf.get("base_url", "")
         tf_model.value = conf.get("model", "")
@@ -266,45 +211,51 @@ def main(page: ft.Page):
 
     def run_task(e):
         if not app.init_client():
-            status_txt.value = "❌ 未配置API"
+            status_txt.value = "❌ 未配置API或Key"
             status_txt.color = "red"
+            page.open(dlg_settings)  # 自动打开设置
             page.update()
             return
+
         btn_analyze.disabled = True
-        btn_analyze.text = "分析中..."
+        btn_analyze.text = "正在分析..."
         page.update()
 
         def task():
             try:
                 p = app.config["current_provider"]
                 if not app.current_image_path:
-                    raise Exception("未选择图片")
+                    raise Exception("请先选择图片")
 
-                # 读取图片并转换base64
                 with open(app.current_image_path, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
 
                 resp = app.client.chat.completions.create(
                     model=app.config["providers"][p]["model"],
-                    messages=[{"role": "system", "content": app.config["system_prompt"]},
-                              {"role": "user",
-                               "content": [{"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                                           {"type": "text", "text": "找出所有隐患"}]}],
+                    messages=[
+                        {"role": "system", "content": app.config["system_prompt"]},
+                        {"role": "user", "content": [
+                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                            {"type": "text", "text": "找出所有隐患"}
+                        ]}
+                    ],
                     temperature=0.1
                 )
                 content = resp.choices[0].message.content.replace("```json", "").replace("```", "")
                 s, e_idx = content.find('['), content.rfind(']') + 1
                 data = json.loads(content[s:e_idx]) if s != -1 and e_idx != -1 else []
                 app.current_data = data
+
+                # 回到主线程更新UI
                 render_results(data)
                 status_txt.value = "✅ 分析完成"
                 status_txt.color = "green"
                 btn_analyze.text = "重新分析"
                 btn_analyze.disabled = False
-                btn_export.disabled = False
+                btn_copy.disabled = False
                 page.update()
             except Exception as err:
-                status_txt.value = f"❌ {str(err)[:20]}"
+                status_txt.value = f"❌ 出错: {str(err)[:20]}"
                 status_txt.color = "red"
                 btn_analyze.text = "重新分析"
                 btn_analyze.disabled = False
@@ -321,96 +272,57 @@ def main(page: ft.Page):
             btn_analyze.disabled = False
             page.update()
 
-    # ================= 修复点3：导出逻辑改为保存文件 =================
-
-    def save_file_result(e: ft.FilePickerResultEvent):
-        """
-        用户选择保存路径后的回调
-        """
-        if e.path:
-            try:
-                excel_bytes_io = app.get_excel_bytes()
-                if excel_bytes_io:
-                    # 将二进制数据写入用户选择的路径
-                    with open(e.path, "wb") as f:
-                        f.write(excel_bytes_io.getvalue())
-
-                    page.snack_bar = ft.SnackBar(ft.Text(f"✅ 文件已保存至: {e.path}"), bgcolor="green")
-                else:
-                    page.snack_bar = ft.SnackBar(ft.Text("❌ 数据为空，无法保存"), bgcolor="red")
-            except Exception as err:
-                page.snack_bar = ft.SnackBar(ft.Text(f"❌ 保存失败: {str(err)}"), bgcolor="red")
-
+    # ================= 复制逻辑 (替代导出) =================
+    def copy_to_clipboard(e):
+        if not app.current_data:
+            page.snack_bar = ft.SnackBar(ft.Text("没有可复制的数据"), bgcolor="red")
             page.snack_bar.open = True
             page.update()
+            return
 
-    # 专用的保存文件选择器
-    save_picker = ft.FilePicker(on_result=save_file_result)
-    page.overlay.append(save_picker)
+        # 构建纯文本报告
+        text_report = "【普洱版纳区域质量安全检查报告】\n"
+        text_report += f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        text_report += "-" * 20 + "\n"
 
-    def trigger_export_options(e):
-        # 弹出底部菜单让用户选择
-        def close_bs(e):
-            export_bs.open = False
-            page.update()
+        for i, item in enumerate(app.current_data):
+            text_report += f"\n🔴 隐患 {i + 1}:\n"
+            text_report += f"{item.get('issue', '无')}\n"
+            text_report += f"⚖️ 规范: {item.get('regulation', '无')}\n"
+            text_report += f"🛠️ 整改: {item.get('correction', '无')}\n"
 
-        def save_excel(e):
-            close_bs(e)
-            if not app.current_data:
-                return
-            # 触发文件保存对话框
-            fname = f"安全检查报告_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
-            save_picker.save_file(file_name=fname, allowed_extensions=["xlsx"])
+        # 写入剪贴板
+        page.set_clipboard(text_report)
 
-        def copy_text(e):
-            close_bs(e)
-            if not app.current_data:
-                return
-            text_report = "=== 普洱版纳区域安全检查报告 ===\n"
-            for i, item in enumerate(app.current_data):
-                text_report += f"\n【隐患{i+1}】{item.get('issue')}\n整改: {item.get('correction')}\n"
-            page.set_clipboard(text_report)
-            page.snack_bar = ft.SnackBar(ft.Text("✅ 文本已复制到剪贴板"), bgcolor="green")
-            page.snack_bar.open = True
-            page.update()
-
-        export_bs = ft.BottomSheet(
-            ft.Container(
-                ft.Column([
-                    # 注意：这里的所有 Icons 都要改成全大写
-                    ft.ListTile(leading=ft.Icon(ft.Icons.TABLE_VIEW), title=ft.Text("保存为 Excel 表格"), on_click=save_excel),
-                    ft.ListTile(leading=ft.Icon(ft.Icons.COPY), title=ft.Text("复制纯文本内容"), on_click=copy_text),
-                    ft.ListTile(leading=ft.Icon(ft.Icons.CANCEL, color="red"), title=ft.Text("取消", color="red"), on_click=close_bs),
-                ], tight=True),
-                padding=10
-            ),
-            dismissible=True
+        # 显示成功提示
+        page.snack_bar = ft.SnackBar(
+            ft.Text("✅ 已保存在剪贴板，可以粘贴在微信或文档中"),
+            bgcolor="green",
+            duration=3000
         )
-        page.overlay.append(export_bs)
-        export_bs.open = True
+        page.snack_bar.open = True
         page.update()
 
     # ================= 布局组装 =================
     dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS],
                               value=app.config.get("current_provider"),
                               on_change=lambda e: refresh_settings(e.control.value))
-    tf_key = ft.TextField(label="Key", password=True)
-    tf_url = ft.TextField(label="URL")
-    tf_model = ft.TextField(label="Model")
-    tf_prompt = ft.TextField(label="提示词", value=app.config.get("system_prompt"), multiline=True, min_lines=3)
-    refresh_settings(app.config.get("current_provider"))
+    tf_key = ft.TextField(label="API Key", password=True)
+    tf_url = ft.TextField(label="Base URL")
+    tf_model = ft.TextField(label="Model Name")
+    tf_prompt = ft.TextField(label="系统提示词", value=app.config.get("system_prompt"), multiline=True, min_lines=3)
 
-    dlg_settings = ft.AlertDialog(title=ft.Text("设置"),
+    dlg_settings = ft.AlertDialog(title=ft.Text("API 设置"),
                                   content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt],
                                                     scroll=ft.ScrollMode.AUTO, height=350, width=300),
-                                  actions=[ft.TextButton("保存", on_click=save_config_ui)])
+                                  actions=[ft.TextButton("保存配置", on_click=save_config_ui)])
 
     pick_dlg = ft.FilePicker(on_result=on_picked)
     page.overlay.append(pick_dlg)
 
     header = ft.Container(
         content=ft.Row([
-            ft.Text("🛡️ 普洱版纳质量安全检查AI", size=18, weight="bold"),
+            ft.Text("🛡️ 普洱版纳区域质量安全检查AI", size=18, weight="bold"),
             ft.Row([
                 ft.IconButton(ft.Icons.SETTINGS, tooltip="设置", on_click=lambda e: page.open(dlg_settings)),
                 ft.IconButton(ft.Icons.EXIT_TO_APP, tooltip="退出", icon_color="red", on_click=lambda e: os._exit(0))
@@ -426,10 +338,10 @@ def main(page: ft.Page):
                                     style=ft.ButtonStyle(bgcolor="blue", color="white", padding=15,
                                                          shape=ft.RoundedRectangleBorder(radius=8)))
 
-    # 按钮改为触发选项
-    btn_export = ft.ElevatedButton("导出结果", icon=ft.Icons.DOWNLOAD, on_click=trigger_export_options, disabled=True,
-                                   style=ft.ButtonStyle(color="green", padding=15,
-                                                        shape=ft.RoundedRectangleBorder(radius=8)))
+    # 修改后的复制按钮
+    btn_copy = ft.ElevatedButton("复制检查结果", icon=ft.Icons.COPY, on_click=copy_to_clipboard, disabled=True,
+                                 style=ft.ButtonStyle(color="green", padding=15,
+                                                      shape=ft.RoundedRectangleBorder(radius=8)))
 
     layout = ft.ResponsiveRow([
         ft.Column(col={"xs": 12, "md": 5}, controls=[
@@ -438,7 +350,7 @@ def main(page: ft.Page):
             ft.Row([
                 ft.Column([btn_upload], expand=1),
                 ft.Column([btn_analyze], expand=1),
-                ft.Column([btn_export], expand=1),
+                ft.Column([btn_copy], expand=1),
             ]),
             ft.Container(content=status_txt, alignment=ft.alignment.center),
         ]),
@@ -455,8 +367,11 @@ def main(page: ft.Page):
     ], spacing=20)
 
     page.add(ft.SafeArea(ft.Container(content=ft.Column([header, layout]), padding=10)))
+
+    # 启动时初始化一次设置输入框，确保已保存的 Key 能显示出来
+    refresh_settings(app.config.get("current_provider"))
+
     render_results([])
 
 
 ft.app(target=main)
-
