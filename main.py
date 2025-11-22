@@ -4,6 +4,7 @@ import json
 import threading
 import os
 import copy
+from datetime import datetime
 from openai import OpenAI
 
 # ================= 1. 预设配置 =================
@@ -48,34 +49,23 @@ class SafetyApp:
         self.client = None
 
     def load_config(self):
-        """
-        读取配置 (修复 persistence 问题)
-        """
-        # 使用 deepcopy 确保默认值不被引用修改
+        """读取配置"""
         default_config = {
             "current_provider": "阿里百炼 (Alibaba)",
             "system_prompt": DEFAULT_PROMPT,
             "providers": copy.deepcopy(PROVIDER_PRESETS)
         }
-
         try:
-            # 尝试从手机安全存储中读取
             if self.page.client_storage.contains_key("app_config"):
                 saved = self.page.client_storage.get("app_config")
-
-                # 简单的校验，防止空数据
                 if not saved or not isinstance(saved, dict):
                     return default_config
-
-                # 补全可能缺失的新字段
                 if "providers" not in saved:
                     saved["providers"] = copy.deepcopy(PROVIDER_PRESETS)
                 else:
-                    # 如果预设里有新厂商，补全到存档里
                     for k, v in PROVIDER_PRESETS.items():
                         if k not in saved["providers"]:
                             saved["providers"][k] = v
-
                 return saved
             else:
                 return default_config
@@ -84,9 +74,7 @@ class SafetyApp:
             return default_config
 
     def save_config_storage(self):
-        """
-        保存配置到手机存储
-        """
+        """保存配置"""
         try:
             self.page.client_storage.set("app_config", self.config)
             return True
@@ -105,13 +93,25 @@ class SafetyApp:
 
 def main(page: ft.Page):
     # ================= 页面设置 =================
-    page.title = "普洱版纳质量安全部-测试版"
+    page.title = "普洱版纳质量安全部"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = "#f2f4f7"
     page.scroll = ft.ScrollMode.AUTO
 
-    # 初始化逻辑
     app = SafetyApp(page)
+
+    # ================= 辅助功能：弹窗提示 =================
+    def show_snack(message, color="green"):
+        """封装更稳定的弹窗提示"""
+        try:
+            # 使用 page.open 是新版 Flet 更稳定的写法
+            page.open(ft.SnackBar(ft.Text(message), bgcolor=color))
+            page.update()
+        except:
+            # 兜底兼容旧版
+            page.snack_bar = ft.SnackBar(ft.Text(message), bgcolor=color)
+            page.snack_bar.open = True
+            page.update()
 
     # ================= 详情抽屉 =================
     def show_bottom_sheet(item):
@@ -183,26 +183,23 @@ def main(page: ft.Page):
     # ================= 逻辑处理 =================
     def save_config_ui(e):
         p = dd_provider.value
-        # 更新内存中的配置
         app.config["current_provider"] = p
         app.config["system_prompt"] = tf_prompt.value
         app.config["providers"][p]["base_url"] = tf_url.value.strip()
         app.config["providers"][p]["model"] = tf_model.value.strip()
         app.config["providers"][p]["api_key"] = tf_key.value.strip()
 
-        # 保存到手机存储
         if app.save_config_storage():
             status_txt.value = "✅ 配置已保存"
-            page.snack_bar = ft.SnackBar(ft.Text("配置已保存，重启后依然有效"), bgcolor="green")
-            page.snack_bar.open = True
+            show_snack("配置已保存，重启后依然有效", "green")
         else:
             status_txt.value = "❌ 保存失败"
+            show_snack("配置保存失败", "red")
 
         page.close(dlg_settings)
         page.update()
 
     def refresh_settings(val):
-        """刷新设置弹窗中的输入框数值"""
         conf = app.config["providers"].get(val, {})
         tf_url.value = conf.get("base_url", "")
         tf_model.value = conf.get("model", "")
@@ -213,7 +210,7 @@ def main(page: ft.Page):
         if not app.init_client():
             status_txt.value = "❌ 未配置API或Key"
             status_txt.color = "red"
-            page.open(dlg_settings)  # 自动打开设置
+            page.open(dlg_settings)
             page.update()
             return
 
@@ -246,7 +243,6 @@ def main(page: ft.Page):
                 data = json.loads(content[s:e_idx]) if s != -1 and e_idx != -1 else []
                 app.current_data = data
 
-                # 回到主线程更新UI
                 render_results(data)
                 status_txt.value = "✅ 分析完成"
                 status_txt.color = "green"
@@ -272,36 +268,37 @@ def main(page: ft.Page):
             btn_analyze.disabled = False
             page.update()
 
-    # ================= 复制逻辑 (替代导出) =================
+    # ================= 复制逻辑 (重写增强版) =================
     def copy_to_clipboard(e):
-        if not app.current_data:
-            page.snack_bar = ft.SnackBar(ft.Text("没有可复制的数据"), bgcolor="red")
-            page.snack_bar.open = True
-            page.update()
-            return
+        """
+        增强的复制功能：带异常捕获和强制提示
+        """
+        try:
+            if not app.current_data:
+                show_snack("没有可复制的数据，请先分析", "red")
+                return
 
-        # 构建纯文本报告
-        text_report = "【普洱版纳区域质量安全检查报告】\n"
-        text_report += f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
-        text_report += "-" * 20 + "\n"
+            # 构建纯文本报告
+            text_report = "【普洱版纳区域质量安全检查报告】\n"
+            text_report += f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            text_report += "-" * 20 + "\n"
 
-        for i, item in enumerate(app.current_data):
-            text_report += f"\n🔴 隐患 {i + 1}:\n"
-            text_report += f"{item.get('issue', '无')}\n"
-            text_report += f"⚖️ 规范: {item.get('regulation', '无')}\n"
-            text_report += f"🛠️ 整改: {item.get('correction', '无')}\n"
+            for i, item in enumerate(app.current_data):
+                text_report += f"\n🔴 隐患 {i + 1}:\n"
+                text_report += f"{item.get('issue', '无')}\n"
+                text_report += f"⚖️ 规范: {item.get('regulation', '无')}\n"
+                text_report += f"🛠️ 整改: {item.get('correction', '无')}\n"
 
-        # 写入剪贴板
-        page.set_clipboard(text_report)
+            # 核心动作：写入剪贴板
+            page.set_clipboard(text_report)
 
-        # 显示成功提示
-        page.snack_bar = ft.SnackBar(
-            ft.Text("✅ 已保存在剪贴板，可以粘贴在微信或文档中"),
-            bgcolor="green",
-            duration=3000
-        )
-        page.snack_bar.open = True
-        page.update()
+            # 成功提示
+            show_snack("✅ 已复制！可直接去微信粘贴", "green")
+
+        except Exception as err:
+            # 失败提示
+            show_snack(f"❌ 复制失败: {str(err)}", "red")
+            print(f"Clipboard Error: {err}")
 
     # ================= 布局组装 =================
     dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS],
@@ -338,8 +335,7 @@ def main(page: ft.Page):
                                     style=ft.ButtonStyle(bgcolor="blue", color="white", padding=15,
                                                          shape=ft.RoundedRectangleBorder(radius=8)))
 
-    # 修改后的复制按钮
-    btn_copy = ft.ElevatedButton("复制检查结果", icon=ft.Icons.COPY, on_click=copy_to_clipboard, disabled=True,
+    btn_copy = ft.ElevatedButton("复制结果", icon=ft.Icons.COPY, on_click=copy_to_clipboard, disabled=True,
                                  style=ft.ButtonStyle(color="green", padding=15,
                                                       shape=ft.RoundedRectangleBorder(radius=8)))
 
@@ -367,10 +363,7 @@ def main(page: ft.Page):
     ], spacing=20)
 
     page.add(ft.SafeArea(ft.Container(content=ft.Column([header, layout]), padding=10)))
-
-    # 启动时初始化一次设置输入框，确保已保存的 Key 能显示出来
     refresh_settings(app.config.get("current_provider"))
-
     render_results([])
 
 
