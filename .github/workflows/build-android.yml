@@ -1,0 +1,51 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 1. 设置 Java 环境 (Android SDK 需要)
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    # 2. 设置 Python
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 3. 设置 Flutter (Flet 底层依赖 Flutter)
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+
+    # 4. 安装 Flet 和 依赖
+    - name: Install Dependencies
+      run: |
+        pip install flet openai
+
+    # 5. 执行 Flet 构建命令
+    - name: Build APK
+      run: |
+        flet build apk --verbose
+
+    # 6. 上传结果
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: Android-App
+        path: build/app/outputs/flutter-apk/app-release.apk
