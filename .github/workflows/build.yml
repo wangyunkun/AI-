@@ -23,17 +23,15 @@ jobs:
         pip install -r requirements.txt
         pip install flet --upgrade
 
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.24.0'
+    # 删除了 Setup Flutter 步骤，让 Flet 自己处理
 
     - name: Flet Build APK
-      # 这里我去掉了 --icon 参数，只保留了名称，确保一定能成功
       run: |
-        flet build apk . --verbose
+        # 核心修改：加了 "yes |" 来自动同意下载
+        yes | flet build apk . --verbose
+
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: safety-app-release
-        path: build/**/*.apk  # 使用通配符，自动寻找生成的APK
+        path: build/**/*.apk
