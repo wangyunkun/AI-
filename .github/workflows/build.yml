@@ -26,16 +26,15 @@ jobs:
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.24.0' # 推荐使用较新的稳定版
+        flutter-version: '3.24.0'
 
     - name: Flet Build APK
-      # 注意：如果你上传了 icon.png 到 assets 文件夹，请保留 --icon 参数
-      # 如果没有 icon，请删除 --icon assets/icon.png 这段
+      # 这里我去掉了 --icon 参数，只保留了名称，确保一定能成功
       run: |
-        flet build apk --product-name "Security check AI"  --verbose
+        flet build apk --product-name "Security check AI" --verbose
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: safety-app-release
-        path: build/**/*.apk   # 核心修改：自动寻找所有 APK 文件
+        path: build/**/*.apk  # 使用通配符，自动寻找生成的APK
