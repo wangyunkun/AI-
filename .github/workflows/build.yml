@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch: # 允许手动点击运行
+  workflow_dispatch:
 
 jobs:
   build:
@@ -26,15 +26,16 @@ jobs:
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.19.0' # Flet 当前依赖的 Flutter 版本
+        flutter-version: '3.24.0' # 推荐使用较新的稳定版
 
     - name: Flet Build APK
-      # 这里会生成一个 build/apk 文件夹
+      # 注意：如果你上传了 icon.png 到 assets 文件夹，请保留 --icon 参数
+      # 如果没有 icon，请删除 --icon assets/icon.png 这段
       run: |
-        flet build apk --product-name "Security check AI" --verbose--verbose
+        flet build apk --product-name "Security check AI"  --verbose
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: safety-app-release
-        path: build/apk/*.apk
+        path: build/**/*.apk   # 核心修改：自动寻找所有 APK 文件
