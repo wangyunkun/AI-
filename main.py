@@ -93,7 +93,7 @@ class SafetyApp:
 
 def main(page: ft.Page):
     # ================= 页面设置 =================
-    page.title = "普洱版纳质量安全部"
+    page.title = "西双版纳州水利工程质量与安全中心"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = "#f2f4f7"
     page.scroll = ft.ScrollMode.AUTO
@@ -279,7 +279,7 @@ def main(page: ft.Page):
                 return
 
             # 构建纯文本报告
-            text_report = "【普洱版纳区域质量安全检查报告】\n"
+            text_report = "【西双版纳州水利工程质量与安全中心质量安全检查报告】\n"
             text_report += f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
             text_report += "-" * 20 + "\n"
 
@@ -368,3 +368,4 @@ def main(page: ft.Page):
 
 
 ft.app(target=main)
+
