@@ -1,0 +1,40 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch: # 允许手动点击运行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install flet
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.19.0' # Flet 当前依赖的 Flutter 版本
+
+    - name: Flet Build APK
+      # 这里会生成一个 build/apk 文件夹
+      run: |
+        flet build apk --verbose
+
+    - name: Upload APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: safety-app-release
+        path: build/apk/*.apk
