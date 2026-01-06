@@ -21,7 +21,7 @@ jobs:
     - name: Install Dependencies
       run: |
         pip install -r requirements.txt
-        pip install flet
+        pip install flet --upgrade
 
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
@@ -31,8 +31,7 @@ jobs:
     - name: Flet Build APK
       # 这里我去掉了 --icon 参数，只保留了名称，确保一定能成功
       run: |
-        flet  build apk . --product-name "Security check AI" --verbose
-
+        flet build apk . --product-name="Security Check AI" --verbose
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
