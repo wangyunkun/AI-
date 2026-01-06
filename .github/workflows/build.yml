@@ -13,29 +13,49 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    # 新增：配置 Java 环境 (Android 打包必须)
+    - name: Setup Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    # 新增：配置 Python
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
-    # 👇👇👇 新增：安装 Linux 系统缺少的基础库 👇👇👇
+    # 关键修复 1：安装 Linux 基础图形库 (解决 Linux toolchain 报错)
+    # 我加了 mesa-utils 来解决截图里的 driver information 警告
     - name: Install Linux Libraries
       run: |
         sudo apt-get update
-        sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev mesa-utils
 
+    # 关键修复 2：使用官方插件安装 Flutter (解决 Android Licenses 报错)
+    # 这个插件会自动同意所有 Android 协议，并安装 Flet 需要的 3.24.0 版本
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+        cache: true
+
+    # 安装 Python 依赖
     - name: Install Dependencies
       run: |
         pip install -r requirements.txt
         pip install flet --upgrade
 
+    # 打包命令 (此时环境已完美，不需要 yes 了)
     - name: Flet Build APK
       run: |
-        # 继续保持 yes | 以自动同意后续可能出现的提示
-        yes | flet build apk . --verbose
+        flet build apk . --verbose
 
+    # 上传结果
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: safety-app-release
-        path: build/**/*
+        path: build/**/*.apk
