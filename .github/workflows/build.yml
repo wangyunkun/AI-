@@ -18,20 +18,24 @@ jobs:
       with:
         python-version: '3.11'
 
+    # 👇👇👇 新增：安装 Linux 系统缺少的基础库 👇👇👇
+    - name: Install Linux Libraries
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
     - name: Install Dependencies
       run: |
         pip install -r requirements.txt
         pip install flet --upgrade
 
-    # 删除了 Setup Flutter 步骤，让 Flet 自己处理
-
     - name: Flet Build APK
       run: |
-        # 核心修改：加了 "yes |" 来自动同意下载
+        # 继续保持 yes | 以自动同意后续可能出现的提示
         yes | flet build apk . --verbose
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
         name: safety-app-release
-        path: build/**/*.apk
+        path: build/**/*
