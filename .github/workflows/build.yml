@@ -31,7 +31,7 @@ jobs:
     - name: Flet Build APK
       # 这里会生成一个 build/apk 文件夹
       run: |
-        flet build apk --verbose
+        flet build apk --product-name "Security check AI" --verbose--verbose
 
     - name: Upload APK
       uses: actions/upload-artifact@v4
