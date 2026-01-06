@@ -109,11 +109,9 @@ def main(page: ft.Page):
 
         # ================= 2. 辅助功能 =================
         def show_snack(message, color="green"):
-            # 修改点1：behavior 改为字符串 "floating"
             page.open(ft.SnackBar(ft.Text(message, color="white"), bgcolor=color, behavior="floating"))
 
         # ================= 3. 详情弹窗 =================
-        # 修改点2：scroll 改为字符串 "auto"
         bs_content = ft.Column(scroll="auto", tight=True)
         bs = ft.BottomSheet(
             content=ft.Container(
@@ -128,7 +126,8 @@ def main(page: ft.Page):
 
         def show_detail(item):
             bs_content.controls = [
-                ft.Container(width=40, height=4, bgcolor="grey", border_radius=10, alignment=ft.alignment.center, opacity=0.3),
+                # 修复点1：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
+                ft.Container(width=40, height=4, bgcolor="grey", border_radius=10, alignment=ft.Alignment(0, 0), opacity=0.3),
                 ft.Container(height=15),
                 ft.Row([
                     ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="red", size=24),
@@ -166,7 +165,8 @@ def main(page: ft.Page):
                             ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=60, color="#CBD5E1"),
                             ft.Text("暂无数据，请先上传照片", color="#94A3B8")
                         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                        alignment=ft.alignment.center,
+                        # 修复点2：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
+                        alignment=ft.Alignment(0, 0),
                         padding=ft.padding.only(top=40)
                     )
                 )
@@ -179,7 +179,9 @@ def main(page: ft.Page):
                         content=ft.Row([
                             ft.Container(
                                 content=ft.Text(str(i + 1), color="white", weight="bold", size=12),
-                                bgcolor="#EF4444", width=24, height=24, border_radius=12, alignment=ft.alignment.center
+                                bgcolor="#EF4444", width=24, height=24, border_radius=12, 
+                                # 修复点3：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
+                                alignment=ft.Alignment(0, 0)
                             ),
                             ft.VerticalDivider(width=8, color="transparent"),
                             ft.Column([
@@ -194,7 +196,7 @@ def main(page: ft.Page):
 
         # ================= 5. 核心控件区 =================
         
-        # 修改点3：fit 改为字符串 "cover"（彻底解决 ImageFit 报错）
+        # fit="cover" 保持字符串写法
         img_control = ft.Image(src="", visible=False, border_radius=12, fit="cover", expand=True)
         
         placeholder_control = ft.Column([
@@ -207,7 +209,8 @@ def main(page: ft.Page):
             height=220,
             bgcolor="#E2E8F0",
             border_radius=16,
-            alignment=ft.alignment.center,
+            # 修复点4：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
+            alignment=ft.Alignment(0, 0),
             on_click=lambda _: pick_dlg.pick_files(),
             shadow=ft.BoxShadow(blur_radius=0, color="transparent")
         )
@@ -326,7 +329,7 @@ def main(page: ft.Page):
 
         dlg_settings = ft.AlertDialog(
             title=ft.Text("系统设置"),
-            content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt], height=400, width=300, scroll="auto"), # scroll="auto"
+            content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt], height=400, width=300, scroll="auto"), 
             actions=[ft.TextButton("保存", on_click=save_settings)]
         )
 
@@ -334,7 +337,7 @@ def main(page: ft.Page):
         
         header = ft.Row([
             ft.Column([
-                ft.Text("西双版纳州水利工程质量与安全中心", size=22, weight="bold", color="#1E293B"),
+                ft.Text("西双版纳州水利工程质量与安全中心AI", size=22, weight="bold", color="#1E293B"),
                 ft.Text("智能识别 · 实时报告", size=12, color="#64748B")
             ]),
             ft.IconButton(ft.Icons.SETTINGS, icon_color="#475569", on_click=lambda e: page.open(dlg_settings))
@@ -371,7 +374,7 @@ def main(page: ft.Page):
                 result_column,
                 ft.Container(height=50)
             ],
-            scroll="auto", # 修改点4：scroll 改为字符串 "auto"
+            scroll="auto",
             expand=True
         )
 
