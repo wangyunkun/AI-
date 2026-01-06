@@ -72,7 +72,6 @@ class SafetyApp:
                 saved = self.page.client_storage.get("app_config")
                 if isinstance(saved, dict) and "providers" in saved:
                     default_config.update(saved)
-                    # 补全可能缺失的预设
                     for k, v in PROVIDER_PRESETS.items():
                         if k not in default_config["providers"]:
                             default_config["providers"][k] = v
@@ -98,25 +97,24 @@ class SafetyApp:
 
 
 def main(page: ft.Page):
-    # ================= 0. 全局错误捕获 (防白屏关键) =================
+    # ================= 0. 全局错误捕获 =================
     try:
-        # ================= 1. 页面基础设置 (手机端适配) =================
+        # ================= 1. 页面基础设置 =================
         page.title = "安检AI"
         page.theme_mode = ft.ThemeMode.LIGHT
-        page.bgcolor = "#F7F9FC"  # 浅灰蓝背景
-        page.padding = 0  # 由 SafeArea 控制边距，防止刘海屏遮挡
-
-        # ⚠️ 注意：这里彻底删除了 window_width/height 设置，避免手机白屏
+        page.bgcolor = "#F7F9FC"
+        page.padding = 0
 
         app = SafetyApp(page)
 
         # ================= 2. 辅助功能 =================
         def show_snack(message, color="green"):
-            page.open(
-                ft.SnackBar(ft.Text(message, color="white"), bgcolor=color, behavior=ft.SnackBarBehavior.FLOATING))
+            # 修改点1：behavior 改为字符串 "floating"
+            page.open(ft.SnackBar(ft.Text(message, color="white"), bgcolor=color, behavior="floating"))
 
-        # ================= 3. 详情弹窗 (Bottom Sheet) =================
-        bs_content = ft.Column(scroll=ft.ScrollMode.AUTO, tight=True)
+        # ================= 3. 详情弹窗 =================
+        # 修改点2：scroll 改为字符串 "auto"
+        bs_content = ft.Column(scroll="auto", tight=True)
         bs = ft.BottomSheet(
             content=ft.Container(
                 content=bs_content,
@@ -130,8 +128,7 @@ def main(page: ft.Page):
 
         def show_detail(item):
             bs_content.controls = [
-                ft.Container(width=40, height=4, bgcolor="grey", border_radius=10, alignment=ft.alignment.center,
-                             opacity=0.3),
+                ft.Container(width=40, height=4, bgcolor="grey", border_radius=10, alignment=ft.alignment.center, opacity=0.3),
                 ft.Container(height=15),
                 ft.Row([
                     ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="red", size=24),
@@ -157,7 +154,7 @@ def main(page: ft.Page):
             page.open(bs)
             page.update()
 
-        # ================= 4. 结果列表 (卡片式) =================
+        # ================= 4. 结果列表 =================
         result_column = ft.Column(spacing=12)
 
         def render_results(data):
@@ -186,8 +183,7 @@ def main(page: ft.Page):
                             ),
                             ft.VerticalDivider(width=8, color="transparent"),
                             ft.Column([
-                                ft.Text(item.get("issue", "未知隐患"), max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
-                                        weight="bold", size=15, color="#1E293B"),
+                                ft.Text(item.get("issue", "未知隐患"), max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, weight="bold", size=15, color="#1E293B"),
                                 ft.Text(item.get("regulation", "无规范")[:18] + "...", size=12, color="#64748B")
                             ], expand=True, spacing=2),
                             ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color="#94A3B8")
@@ -197,11 +193,10 @@ def main(page: ft.Page):
             page.update()
 
         # ================= 5. 核心控件区 =================
-
-        # 图片控件
-        img_control = ft.Image(src="", visible=False, border_radius=12, fit=ft.ImageFit.COVER, expand=True)
-
-        # 占位控件
+        
+        # 修改点3：fit 改为字符串 "cover"（彻底解决 ImageFit 报错）
+        img_control = ft.Image(src="", visible=False, border_radius=12, fit="cover", expand=True)
+        
         placeholder_control = ft.Column([
             ft.Icon(ft.Icons.ADD_A_PHOTO, size=40, color="#94A3B8"),
             ft.Text("点击拍摄/上传照片", color="#94A3B8", size=14)
@@ -209,7 +204,7 @@ def main(page: ft.Page):
 
         img_container = ft.Container(
             content=placeholder_control,
-            height=220,  # 手机高度适配
+            height=220,
             bgcolor="#E2E8F0",
             border_radius=16,
             alignment=ft.alignment.center,
@@ -230,7 +225,6 @@ def main(page: ft.Page):
                 page.open(dlg_settings)
                 return
 
-            # UI 锁定
             btn_analyze.disabled = True
             btn_analyze.text = "AI分析中..."
             loading_anim.visible = True
@@ -254,13 +248,12 @@ def main(page: ft.Page):
                         ],
                         temperature=0.1
                     )
-
+                    
                     content = resp.choices[0].message.content
-                    # 增强 JSON 提取
                     json_str = content.replace("```json", "").replace("```", "").strip()
                     start = json_str.find('[')
                     end = json_str.rfind(']') + 1
-
+                    
                     if start != -1 and end != -1:
                         data = json.loads(json_str[start:end])
                         app.current_data = data
@@ -290,15 +283,15 @@ def main(page: ft.Page):
                 img_control.src = app.current_image_path
                 img_control.visible = True
                 img_container.shadow = ft.BoxShadow(blur_radius=10, color=ft.Colors.BLACK12)
-
+                
                 status_txt.value = "✅ 图片已就绪"
                 btn_analyze.disabled = False
-                render_results([])
+                render_results([]) 
                 page.update()
 
         def copy_result(e):
             if not app.current_data: return
-            txt = "【检查报告】\n" + "\n".join([f"{i + 1}. {item['issue']}" for i, item in enumerate(app.current_data)])
+            txt = "【检查报告】\n" + "\n".join([f"{i+1}. {item['issue']}" for i, item in enumerate(app.current_data)])
             page.set_clipboard(txt)
             show_snack("已复制到剪贴板", "green")
 
@@ -324,25 +317,21 @@ def main(page: ft.Page):
         pick_dlg = ft.FilePicker(on_result=on_picked)
         page.overlay.append(pick_dlg)
 
-        dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS],
-                                  value=app.config.get("current_provider"),
-                                  on_change=lambda e: update_settings_view(e.control.value))
+        dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS], 
+                                  value=app.config.get("current_provider"), on_change=lambda e: update_settings_view(e.control.value))
         tf_key = ft.TextField(label="API Key", password=True, can_reveal_password=True, text_size=14)
         tf_url = ft.TextField(label="Base URL", text_size=14)
         tf_model = ft.TextField(label="Model", text_size=14)
-        tf_prompt = ft.TextField(label="系统提示词", multiline=True, min_lines=2, text_size=12,
-                                 value=app.config.get("system_prompt"))
+        tf_prompt = ft.TextField(label="系统提示词", multiline=True, min_lines=2, text_size=12, value=app.config.get("system_prompt"))
 
         dlg_settings = ft.AlertDialog(
             title=ft.Text("系统设置"),
-            content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt], height=400, width=300,
-                              scroll=ft.ScrollMode.AUTO),
+            content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt], height=400, width=300, scroll="auto"), # scroll="auto"
             actions=[ft.TextButton("保存", on_click=save_settings)]
         )
 
         # ================= 8. 主页面布局 =================
-
-        # 顶部栏
+        
         header = ft.Row([
             ft.Column([
                 ft.Text("西双版纳州水利工程质量与安全中心", size=22, weight="bold", color="#1E293B"),
@@ -351,25 +340,23 @@ def main(page: ft.Page):
             ft.IconButton(ft.Icons.SETTINGS, icon_color="#475569", on_click=lambda e: page.open(dlg_settings))
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
-        # 按钮
         btn_analyze = ft.ElevatedButton(
-            "开始智能分析",
-            icon=ft.Icons.AUTO_AWESOME,
+            "开始智能分析", 
+            icon=ft.Icons.AUTO_AWESOME, 
             on_click=run_analysis,
             bgcolor="#2563EB", color="white",
             style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), padding=16),
             expand=True
         )
-
+        
         btn_copy = ft.ElevatedButton(
-            "复制",
+            "复制", 
             icon=ft.Icons.COPY,
             on_click=copy_result,
             disabled=True,
             style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), padding=16),
         )
 
-        # 整体滚动容器
         main_layout = ft.Column(
             controls=[
                 header,
@@ -382,21 +369,16 @@ def main(page: ft.Page):
                 ft.Divider(height=30, color="#E2E8F0"),
                 ft.Text("检查结果", size=16, weight="bold", color="#334155"),
                 result_column,
-                ft.Container(height=50)  # 底部安全距离
+                ft.Container(height=50)
             ],
-            scroll=ft.ScrollMode.AUTO,  # 关键：允许页面滚动
+            scroll="auto", # 修改点4：scroll 改为字符串 "auto"
             expand=True
         )
 
-        # 使用 SafeArea 适配刘海屏
         page.add(ft.SafeArea(ft.Container(main_layout, padding=20), expand=True))
-
-        # 初始化
         update_settings_view(app.config.get("current_provider"))
 
     except Exception as e:
-        # ================= 9. 崩溃保护界面 =================
-        # 如果前面任何步骤报错，这里会捕获并显示在屏幕上
         page.clean()
         page.bgcolor = "white"
         page.add(
@@ -410,11 +392,10 @@ def main(page: ft.Page):
                         content=ft.Text(str(e), size=14, font_family="monospace"),
                         bgcolor="#FEE2E2", padding=10, border_radius=8
                     )
-                ], scroll=ft.ScrollMode.AUTO)
+                ], scroll="auto")
             )
         )
         page.update()
         print(f"CRITICAL ERROR: {e}")
-
 
 ft.app(target=main)
