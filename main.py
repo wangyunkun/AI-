@@ -170,24 +170,28 @@ def main(page: ft.Page):
                 )
             else:
                 for i, item in enumerate(data):
+                    card_content = ft.Row([
+                        ft.Container(
+                            content=ft.Text(str(i + 1), color="white", weight="bold", size=12),
+                            bgcolor="#EF4444", width=24, height=24, border_radius=12, 
+                            alignment=ft.Alignment(0, 0)
+                        ),
+                        ft.VerticalDivider(width=8, color="transparent"),
+                        ft.Column([
+                            ft.Text(item.get("issue", "未知隐患"), max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, weight="bold", size=15, color="#1E293B"),
+                            ft.Text(item.get("regulation", "无规范")[:18] + "...", size=12, color="#64748B")
+                        ], expand=True, spacing=2),
+                        ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color="#94A3B8")
+                    ], alignment=ft.MainAxisAlignment.START)
+                    
+                    # 使用变量创建卡片，然后绑定点击事件
                     card = ft.Container(
                         bgcolor="white", padding=15, border_radius=12,
                         shadow=ft.BoxShadow(blur_radius=5, color=ft.Colors.BLACK12, offset=ft.Offset(0, 2)),
-                        on_click=lambda e, d=item: show_detail(d),
-                        content=ft.Row([
-                            ft.Container(
-                                content=ft.Text(str(i + 1), color="white", weight="bold", size=12),
-                                bgcolor="#EF4444", width=24, height=24, border_radius=12, 
-                                alignment=ft.Alignment(0, 0)
-                            ),
-                            ft.VerticalDivider(width=8, color="transparent"),
-                            ft.Column([
-                                ft.Text(item.get("issue", "未知隐患"), max_lines=1, overflow=ft.TextOverflow.ELLIPSIS, weight="bold", size=15, color="#1E293B"),
-                                ft.Text(item.get("regulation", "无规范")[:18] + "...", size=12, color="#64748B")
-                            ], expand=True, spacing=2),
-                            ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color="#94A3B8")
-                        ], alignment=ft.MainAxisAlignment.START)
+                        content=card_content
                     )
+                    card.on_click = lambda e, d=item: show_detail(d)
+                    
                     result_column.controls.append(card)
             page.update()
 
@@ -200,16 +204,15 @@ def main(page: ft.Page):
             ft.Text("点击拍摄/上传照片", color="#94A3B8", size=14)
         ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
 
-        # 这里的 FilePicker 会在后面初始化
         img_container = ft.Container(
             content=placeholder_control,
             height=220,
             bgcolor="#E2E8F0",
             border_radius=16,
             alignment=ft.Alignment(0, 0),
-            # on_click 会在后面绑定
             shadow=ft.BoxShadow(blur_radius=0, color="transparent")
         )
+        # 点击事件在后面绑定
 
         status_txt = ft.Text("准备就绪", size=13, color="#64748B")
         loading_anim = ft.ProgressRing(width=18, height=18, stroke_width=2, visible=False)
@@ -314,16 +317,18 @@ def main(page: ft.Page):
 
         # ================= 7. 设置弹窗与Picker =================
         
-        # ⚠️ 关键修改：分开创建和赋值，解决 FilePicker.__init__ 报错问题
+        # ⚠️ 修复关键：创建对象时不带事件，后面再绑定
         pick_dlg = ft.FilePicker()
-        pick_dlg.on_result = on_picked  # 在这里绑定事件
+        pick_dlg.on_result = on_picked 
         page.overlay.append(pick_dlg)
         
-        # 绑定点击事件
         img_container.on_click = lambda _: pick_dlg.pick_files()
 
+        # ⚠️ 修复关键：Dropdown 创建时不带 on_change
         dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS], 
-                                  value=app.config.get("current_provider"), on_change=lambda e: update_settings_view(e.control.value))
+                                  value=app.config.get("current_provider"))
+        dd_provider.on_change = lambda e: update_settings_view(e.control.value) # 后面绑定
+
         tf_key = ft.TextField(label="API Key", password=True, can_reveal_password=True, text_size=14)
         tf_url = ft.TextField(label="Base URL", text_size=14)
         tf_model = ft.TextField(label="Model", text_size=14)
@@ -345,22 +350,23 @@ def main(page: ft.Page):
             ft.IconButton(ft.Icons.SETTINGS, icon_color="#475569", on_click=lambda e: page.open(dlg_settings))
         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
+        # ⚠️ 修复关键：Button 创建时不带 on_click
         btn_analyze = ft.ElevatedButton(
             "开始智能分析", 
             icon=ft.Icons.AUTO_AWESOME, 
-            on_click=run_analysis,
             bgcolor="#2563EB", color="white",
             style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), padding=16),
             expand=True
         )
+        btn_analyze.on_click = run_analysis # 后面绑定
         
         btn_copy = ft.ElevatedButton(
             "复制", 
             icon=ft.Icons.COPY,
-            on_click=copy_result,
             disabled=True,
             style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), padding=16),
         )
+        btn_copy.on_click = copy_result # 后面绑定
 
         main_layout = ft.Column(
             controls=[
