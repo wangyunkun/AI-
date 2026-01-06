@@ -24,30 +24,28 @@ jobs:
       with:
         python-version: '3.11'
 
-    # 安装 Linux 基础库 (解决之前那个 driver 报错)
     - name: Install Linux Libraries
       run: |
         sudo apt-get update
         sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev mesa-utils
 
-    # 👇👇👇 核心修改在这里 👇👇👇
-    # 将版本号从 3.24.0 改为 3.27.0，满足 Flet 的要求
+    # 👇👇👇 重点修改 1：回退到 Flutter 3.24.0 (配合 Flet 0.25.2) 👇👇👇
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
-        flutter-version: '3.27.0'  # <--- 修改了这里！
+        flutter-version: '3.24.0'
         channel: 'stable'
         cache: true
 
+    # 👇👇👇 重点修改 2：强制安装 Flet 0.25.2 (最稳定版本) 👇👇👇
     - name: Install Dependencies
       run: |
         pip install -r requirements.txt
-        pip install flet --upgrade
+        pip install flet==0.25.2
 
-    # 哪怕版本对上了，我们还是保留 "yes |" 作为双重保险
-    # 万一它还要问别的问题，yes 会自动帮我们同意
     - name: Flet Build APK
       run: |
+        # 0.25.2 版本不需要 yes 也能跑，但保留着也没事
         yes | flet build apk . --verbose
 
     - name: Upload APK
