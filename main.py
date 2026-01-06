@@ -126,7 +126,6 @@ def main(page: ft.Page):
 
         def show_detail(item):
             bs_content.controls = [
-                # 修复点1：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
                 ft.Container(width=40, height=4, bgcolor="grey", border_radius=10, alignment=ft.Alignment(0, 0), opacity=0.3),
                 ft.Container(height=15),
                 ft.Row([
@@ -165,7 +164,6 @@ def main(page: ft.Page):
                             ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE, size=60, color="#CBD5E1"),
                             ft.Text("暂无数据，请先上传照片", color="#94A3B8")
                         ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                        # 修复点2：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
                         alignment=ft.Alignment(0, 0),
                         padding=ft.padding.only(top=40)
                     )
@@ -180,7 +178,6 @@ def main(page: ft.Page):
                             ft.Container(
                                 content=ft.Text(str(i + 1), color="white", weight="bold", size=12),
                                 bgcolor="#EF4444", width=24, height=24, border_radius=12, 
-                                # 修复点3：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
                                 alignment=ft.Alignment(0, 0)
                             ),
                             ft.VerticalDivider(width=8, color="transparent"),
@@ -196,7 +193,6 @@ def main(page: ft.Page):
 
         # ================= 5. 核心控件区 =================
         
-        # fit="cover" 保持字符串写法
         img_control = ft.Image(src="", visible=False, border_radius=12, fit="cover", expand=True)
         
         placeholder_control = ft.Column([
@@ -204,14 +200,14 @@ def main(page: ft.Page):
             ft.Text("点击拍摄/上传照片", color="#94A3B8", size=14)
         ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
 
+        # 这里的 FilePicker 会在后面初始化
         img_container = ft.Container(
             content=placeholder_control,
             height=220,
             bgcolor="#E2E8F0",
             border_radius=16,
-            # 修复点4：alignment=ft.alignment.center 改为 alignment=ft.Alignment(0, 0)
             alignment=ft.Alignment(0, 0),
-            on_click=lambda _: pick_dlg.pick_files(),
+            # on_click 会在后面绑定
             shadow=ft.BoxShadow(blur_radius=0, color="transparent")
         )
 
@@ -316,9 +312,15 @@ def main(page: ft.Page):
             tf_key.value = conf.get("api_key", "")
             page.update()
 
-        # ================= 7. 设置弹窗 =================
-        pick_dlg = ft.FilePicker(on_result=on_picked)
+        # ================= 7. 设置弹窗与Picker =================
+        
+        # ⚠️ 关键修改：分开创建和赋值，解决 FilePicker.__init__ 报错问题
+        pick_dlg = ft.FilePicker()
+        pick_dlg.on_result = on_picked  # 在这里绑定事件
         page.overlay.append(pick_dlg)
+        
+        # 绑定点击事件
+        img_container.on_click = lambda _: pick_dlg.pick_files()
 
         dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS], 
                                   value=app.config.get("current_provider"), on_change=lambda e: update_settings_view(e.control.value))
