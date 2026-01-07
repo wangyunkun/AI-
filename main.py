@@ -336,9 +336,9 @@ def main(page: ft.Page):
     # 🔧 修复：使用 expand=True 确保 Row 撑满宽度，space_between 才会生效
     header = ft.Row([
         ft.Column([
-            ft.Text("西双版纳州水利工程质量与安全中心", size=22, weight="bold", color="#1E293B"),
+            ft.Text("版纳州水利质量与安全中心", size=22, weight="bold", color="#1E293B"),
             ft.Text("智能识别 · 实时分析", size=12, color="#64748B")
-        ]),
+        ], expand=True), 
         ft.IconButton(ft.Icons.SETTINGS, icon_color="#475569", icon_size=28,
                       on_click=lambda e: setattr(dlg_settings, 'open', True) or page.update())
     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
@@ -376,10 +376,11 @@ def main(page: ft.Page):
     )
 
     # 🔧 修复：SafeArea 包裹整个 View，确保顶部不被遮挡
-    page.add(ft.SafeArea(ft.Container(main_layout, padding=20), expand=True))
+    page.add(ft.SafeArea(ft.Container(main_layout, padding=10), expand=True))
     
     # 启动时刷新配置
     update_settings_view(app.config.get("current_provider"))
 
 ft.app(target=main)
+
 
