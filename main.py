@@ -88,7 +88,7 @@ class SafetyApp:
 
 def main(page: ft.Page):
     # ================= 1. 页面初始化 =================
-    page.title = "安全检查AI""a
+    page.title = "安全检查AI"
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = "#F7F9FC"
     page.padding = 0
@@ -382,3 +382,4 @@ def main(page: ft.Page):
     update_settings_view(app.config.get("current_provider"))
 
 ft.app(target=main)
+
