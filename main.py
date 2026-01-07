@@ -3,6 +3,7 @@ import base64
 import json
 import threading
 import copy
+from datetime import datetime
 from openai import OpenAI
 
 # ================= 1. 预设配置 =================
@@ -87,16 +88,15 @@ class SafetyApp:
 
 def main(page: ft.Page):
     # ================= 1. 页面初始化 =================
-    page.title = "安全检查AI"
+    page.title = "安全检查AI""a
     page.theme_mode = ft.ThemeMode.LIGHT
     page.bgcolor = "#F7F9FC"
-    page.padding = 0  # 手机端由SafeArea控制
+    page.padding = 0
 
     app = SafetyApp(page)
 
     # ================= 2. 辅助组件 =================
     def show_snack(message, color="green"):
-        # 0.25.2 经典写法：SnackBar 赋值给 page
         page.snack_bar = ft.SnackBar(ft.Text(message, color="white"), bgcolor=color, behavior="floating")
         page.snack_bar.open = True
         page.update()
@@ -108,12 +108,10 @@ def main(page: ft.Page):
             content=bs_content,
             padding=25,
             bgcolor="white",
-            # 0.25.2 经典写法 (小写)
             border_radius=ft.border_radius.only(top_left=20, top_right=20),
         ),
         dismissible=True
     )
-    # 必须添加到 overlay
     page.overlay.append(bs)
 
     def show_detail(item):
@@ -126,17 +124,17 @@ def main(page: ft.Page):
             ]),
             ft.Divider(height=20, color="#EEEEEE"),
             ft.Text("问题描述", color="grey", size=12),
-            ft.Text(item.get("issue", ""), size=16, weight="w500"),
+            ft.Text(item.get("issue", ""), size=16, weight="w500", selectable=True), # 允许长按复制
             ft.Container(height=10),
             ft.Text("规范依据", color="grey", size=12),
             ft.Container(
-                content=ft.Text(item.get("regulation", ""), size=14, color="#1D4ED8"),
+                content=ft.Text(item.get("regulation", ""), size=14, color="#1D4ED8", selectable=True),
                 bgcolor="#EFF6FF", padding=10, border_radius=6
             ),
             ft.Container(height=10),
             ft.Text("整改建议", color="grey", size=12),
             ft.Container(
-                content=ft.Text(item.get("correction", ""), size=14, color="#15803D"),
+                content=ft.Text(item.get("correction", ""), size=14, color="#15803D", selectable=True),
                 bgcolor="#F0FDF4", padding=10, border_radius=6
             ),
             ft.Container(height=30)
@@ -162,7 +160,6 @@ def main(page: ft.Page):
             )
         else:
             for i, item in enumerate(data):
-                # 列表卡片
                 card = ft.Container(
                     bgcolor="white", padding=15, border_radius=12,
                     shadow=ft.BoxShadow(blur_radius=5, color=ft.Colors.BLACK12, offset=ft.Offset(0, 2)),
@@ -178,18 +175,15 @@ def main(page: ft.Page):
                             ft.Text(item.get("regulation", "无规范")[:18] + "...", size=12, color="#64748B")
                         ], expand=True, spacing=2),
                         ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color="#94A3B8")
-                    ], alignment="start")
+                    ], alignment="start", vertical_alignment="center")
                 )
-                # 事件单独绑定
                 card.on_click = lambda e, d=item: show_detail(d)
                 result_column.controls.append(card)
         page.update()
 
     # ================= 4. 核心控件 =================
-    # 图片
     img_control = ft.Image(src="", visible=False, border_radius=12, fit="cover", expand=True)
     
-    # 选图组件
     pick_dlg = ft.FilePicker()
     page.overlay.append(pick_dlg)
 
@@ -251,6 +245,7 @@ def main(page: ft.Page):
                 s, e = json_str.find('['), json_str.rfind(']') + 1
                 if s != -1 and e != -1:
                     data = json.loads(json_str[s:e])
+                    app.current_data = data # 保存数据，用于复制
                     render_results(data)
                     status_txt.value = f"✅ 发现 {len(data)} 处隐患"
                     show_snack("分析完成", "green")
@@ -279,13 +274,26 @@ def main(page: ft.Page):
             render_results([]) 
             page.update()
     
-    # 绑定 FilePicker 事件
     pick_dlg.on_result = on_picked
 
+    # 🔧 修复：复制逻辑重写，拼接完整报告
     def copy_result(e):
-        if not result_column.controls: return
-        page.set_clipboard("检查报告已复制")
-        show_snack("已复制", "green")
+        if not app.current_data:
+            show_snack("没有可复制的内容", "red")
+            return
+        
+        # 拼接文本报告
+        report = "【安全检查报告】\n"
+        report += f"检查时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        report += "-" * 20 + "\n"
+        
+        for i, item in enumerate(app.current_data):
+            report += f"{i+1}. {item.get('issue', '未知问题')}\n"
+            report += f"   🛑 依据: {item.get('regulation', '无')}\n"
+            report += f"   ✅ 整改: {item.get('correction', '无')}\n\n"
+        
+        page.set_clipboard(report)
+        show_snack("报告已复制到剪贴板", "green")
 
     # ================= 6. 设置弹窗 =================
     def save_settings(e):
@@ -307,7 +315,6 @@ def main(page: ft.Page):
         tf_key.value = conf.get("api_key", "")
         page.update()
 
-    # 组件
     dd_provider = ft.Dropdown(label="厂商", options=[ft.dropdown.Option(k) for k in PROVIDER_PRESETS], 
                               value=app.config.get("current_provider"))
     dd_provider.on_change = lambda e: update_settings_view(e.control.value)
@@ -322,18 +329,19 @@ def main(page: ft.Page):
         content=ft.Column([dd_provider, tf_key, tf_url, tf_model, tf_prompt], height=400, width=300, scroll="auto"), 
         actions=[ft.TextButton("保存", on_click=save_settings)]
     )
-    # 0.25.2 必须使用 page.dialog 或 overlay
     page.dialog = dlg_settings
 
-    # ================= 7. 布局组装 =================
+    # ================= 7. 布局组装 (修复比例问题) =================
+    
+    # 🔧 修复：使用 expand=True 确保 Row 撑满宽度，space_between 才会生效
     header = ft.Row([
         ft.Column([
-            ft.Text("西双版纳州水利工程质量与安全中心AI", size=22, weight="bold", color="#1E293B"),
+            ft.Text("西双版纳州水利工程质量与安全中心", size=22, weight="bold", color="#1E293B"),
             ft.Text("智能识别 · 实时分析", size=12, color="#64748B")
         ]),
-        ft.IconButton(ft.Icons.SETTINGS, icon_color="#475569", 
+        ft.IconButton(ft.Icons.SETTINGS, icon_color="#475569", icon_size=28,
                       on_click=lambda e: setattr(dlg_settings, 'open', True) or page.update())
-    ], alignment="spaceBetween")
+    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     btn_analyze = ft.ElevatedButton(
         "开始智能分析", icon=ft.Icons.AUTO_AWESOME, 
@@ -344,15 +352,15 @@ def main(page: ft.Page):
     btn_analyze.on_click = run_analysis
     
     btn_copy = ft.ElevatedButton(
-        "复制", icon=ft.Icons.COPY,
+        "复制结果", icon=ft.Icons.COPY, # 修改了按钮文字
         style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12), padding=16),
     )
     btn_copy.on_click = copy_result
 
     main_layout = ft.Column(
         controls=[
-            header,
-            ft.Container(height=15),
+            # 🔧 修复：让 Header 所在的容器撑满宽度
+            ft.Container(content=header, padding=ft.padding.only(bottom=10)),
             img_container,
             ft.Container(height=10),
             ft.Row([loading_anim, status_txt], alignment="center"),
@@ -367,7 +375,10 @@ def main(page: ft.Page):
         expand=True
     )
 
+    # 🔧 修复：SafeArea 包裹整个 View，确保顶部不被遮挡
     page.add(ft.SafeArea(ft.Container(main_layout, padding=20), expand=True))
+    
+    # 启动时刷新配置
     update_settings_view(app.config.get("current_provider"))
 
 ft.app(target=main)
