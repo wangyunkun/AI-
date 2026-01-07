@@ -13,23 +13,26 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    # 1. 配置 Java (Android 编译必须)
     - name: Setup Java
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
         java-version: '17'
 
+    # 2. 配置 Python
     - name: Setup Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
 
+    # 3. 安装 Linux 图形库 (防止 flutter doctor 报错)
     - name: Install Linux Libraries
       run: |
         sudo apt-get update
         sudo apt-get install -y libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev mesa-utils
 
-    # 👇👇👇 重点修改 1：回退到 Flutter 3.24.0 (配合 Flet 0.25.2) 👇👇👇
+    # 4. 锁定 Flutter 版本 3.24.0 (稳定之选)
     - name: Setup Flutter
       uses: subosito/flutter-action@v2
       with:
@@ -37,17 +40,17 @@ jobs:
         channel: 'stable'
         cache: true
 
-    # 👇👇👇 重点修改 2：强制安装 Flet 0.25.2 (最稳定版本) 👇👇👇
+    # 5. 安装依赖 (会安装 flet 0.25.2)
     - name: Install Dependencies
       run: |
         pip install -r requirements.txt
-        pip install flet==0.25.2
 
+    # 6. 开始打包
     - name: Flet Build APK
       run: |
-        # 0.25.2 版本不需要 yes 也能跑，但保留着也没事
-        yes | flet build apk . --verbose
+        flet build apk . --verbose
 
+    # 7. 上传结果
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
