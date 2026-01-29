@@ -336,7 +336,7 @@ def main(page: ft.Page):
     # 🔧 修复：使用 expand=True 确保 Row 撑满宽度，space_between 才会生效
     header = ft.Row([
         ft.Column([
-            ft.Text("版纳州水利质量与安全中心", size=22, weight="bold", color="#1E293B"),
+            ft.Text("勐海县水利质量与安全中心", size=22, weight="bold", color="#1E293B"),
             ft.Text("智能识别 · 实时分析", size=12, color="#64748B")
         ], expand=True), 
         ft.IconButton(ft.Icons.SETTINGS, icon_color="#475569", icon_size=28,
@@ -382,5 +382,6 @@ def main(page: ft.Page):
     update_settings_view(app.config.get("current_provider"))
 
 ft.app(target=main)
+
 
 
