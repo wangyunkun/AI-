@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-建设工程质量安全检查助手 - 手机版 V4.6
-基于 v4.6 版提示词系统
-修复：
-1. 移除所有 QPropertyAnimation pos 动画（主要卡死原因）
-2. Toast 改用 QTimer 简单显隐
-3. 设置改回 QDialog（稳定）
-4. 移除 resizeEvent 中的动态布局
-5. FAB 改为固定布局内按钮
-6. 使用 V4.6 版提示词系统（更专业的规范依据和检查清单）
-7. 添加日志窗口显示分析状态
-"""
 
 import sys, os, json, base64, time, re
 from datetime import datetime
@@ -1599,7 +1587,8 @@ class HomePage(QWidget):
 class SummaryPage(QWidget):
     copy_all = pyqtSignal()
     delete_issue = pyqtSignal(dict)
-    show_detail = pyqtSignal(dict)  # 新增：显示详情信号
+    show_detail = pyqtSignal(dict)
+    show_detail_edit = pyqtSignal(dict)  # 新增：显示详情并编辑信号
 
     def __init__(self):
         super().__init__()
@@ -1681,6 +1670,7 @@ class SummaryPage(QWidget):
             src.setStyleSheet(f"font-size:11px;color:{DS['text_hint']};padding:2px 4px;")
             self.cl.addWidget(src)
             card = RiskCard(issue, i)
+            card.edit_requested.connect(self.show_detail_edit)  # 连接编辑信号
             card.delete_requested.connect(self.delete_issue)
             card.card_clicked.connect(self.show_detail)  # 连接点击信号
             self.cl.addWidget(card)
@@ -1730,7 +1720,7 @@ class MainWindow(QMainWindow):
         self.done_task = 0
         self._detail_page = None
 
-        self.setWindowTitle("安全质检助手 V4.6")
+        self.setWindowTitle("质量安全检查v2.0版")
         self.resize(390, 844)
 
         root = QWidget()
@@ -1750,6 +1740,7 @@ class MainWindow(QMainWindow):
         self.summary.copy_all.connect(self.copy_all)
         self.summary.delete_issue.connect(self._delete_from_summary)
         self.summary.show_detail.connect(self._show_issue_detail)  # 连接详情信号
+        self.summary.show_detail_edit.connect(self._edit_from_summary)  # 连接编辑信号
 
         self.stack.addWidget(self.home)     # 0
         self.stack.addWidget(self.summary)  # 1
@@ -1987,6 +1978,10 @@ class MainWindow(QMainWindow):
             dlg.exec()
         except Exception as e:
             self._toast(f"显示详情失败：{str(e)}", success=False)
+
+    def _edit_from_summary(self, issue):
+        """从汇总页编辑问题"""
+        self._edit_single(issue)
 
     def copy_all(self):
         all_issues = []
