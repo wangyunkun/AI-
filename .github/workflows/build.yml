@@ -21,6 +21,8 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
+          # 顺手修复 urllib3 的红字警告
+          pip install urllib3==1.26.15 requests==2.31.0
           pip install -r requirements.txt
 
       - name: Setup Java (Required for Android SDK)
@@ -34,11 +36,22 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Accept Android Licenses (Crucial Step)
-        run: yes | flutter doctor --android-licenses
+      - name: Configure Flutter (Fix Linux Toolchain Error)
+        run: |
+          # 🚨 关键修复：直接禁用掉 Linux 和 Web 的检查，防止 Flet 误杀！
+          flutter config --no-enable-linux-desktop
+          flutter config --no-enable-web
+          flutter config --no-enable-macos-desktop
+          flutter config --no-enable-windows-desktop
+          
+          # 自动同意安卓协议
+          yes | flutter doctor --android-licenses
+          
+          # 运行一次 doctor 确认全绿
+          flutter doctor
 
       - name: Build APK with Flet
-        run: flet build apk --project-name "QualityCheckApp" --project-version "4.6.0"
+        run: flet build apk .
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
