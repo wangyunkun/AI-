@@ -568,4 +568,5 @@ def main(page: ft.Page):
     render_home()
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.app(main)
+
