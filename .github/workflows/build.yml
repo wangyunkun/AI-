@@ -6,9 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  PYTHON_VERSION: "3.12"
-  FLUTTER_VERSION: "3.27.4"    # 必须与 flet 0.27.x 配套
-  FLET_CLI_NO_RICH_OUTPUT: 1
+  PYTHON_VERSION: "3.11"        # ⚠️ 必须用 3.11，不能用 3.12
+  FLUTTER_VERSION: "3.24.3"     # ✅ 与 flet 0.25.x 经验证可用的配对
   PYTHONUTF8: 1
 
 jobs:
@@ -24,11 +23,11 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: 配置 Java JDK 21
+      - name: 配置 Java JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '21'
+          java-version: '17'      # flet 0.25.x 推荐 JDK 17
 
       - name: 配置 Flutter ${{ env.FLUTTER_VERSION }}
         uses: subosito/flutter-action@v2
@@ -37,13 +36,21 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: 安装 flet CLI
+      - name: 升级 pip 并修复 requests 冲突
         run: |
           python -m pip install --upgrade pip
-          pip install "flet==0.27.6"
+          pip install "urllib3<2" "charset-normalizer<3"
+          pip install "flet==0.25.0"
 
-      - name: 验证 flet 版本
-        run: flet --version
+      - name: 接受 Android 许可证
+        run: |
+          yes | flutter doctor --android-licenses || true
+
+      - name: 验证环境
+        run: |
+          flet --version
+          flutter --version
+          java -version
 
       - name: 关闭 Flutter 统计
         run: flutter config --no-analytics
@@ -56,7 +63,7 @@ jobs:
             --build-number ${{ github.run_number }} \
             --build-version 1.0.${{ github.run_number }}
 
-      - name: 上传 APK 产物
+      - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: apk-release-${{ github.run_number }}
