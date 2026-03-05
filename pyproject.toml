@@ -1,0 +1,17 @@
+[project]
+name = "construction-inspector"
+version = "1.0.0"
+description = "质量安全检查助手"
+requires-python = ">=3.10"
+dependencies = [
+    "flet==0.27.6",
+    "openai==1.51.0",
+]
+
+[tool.flet]
+org = "com.yourcompany"
+product = "安全质检助手"
+company = "YourCompany"
+
+[tool.flet.android]
+permissions = ["INTERNET"]
